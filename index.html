@@ -8,27 +8,70 @@
     body {
       margin: 0;
       display: flex;
-      justify-content: center;
-      align-items: center;
       height: 100vh;
       background-color: #f0f0f0;
     }
-    canvas {
-      border: 1px solid black;
-	  display: block;
+
+    /* 🎯 왼쪽 라이브러리 패널 */
+    .library-panel {
+      width: 200px;
+      background: #ffffff;
+      border-right: 1px solid #ccc;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+      position: fixed;
+      left: 0;
+      top: 0;
+      bottom: 0;
     }
-	
-	.controls {
-      position: absolute;
-      top: 10px; /* 캔버스 상단에서 10px */
-      left: 50%;
-      transform: translateX(-50%);
+
+    .library-panel h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .library-item {
+      width: 100%;
+      padding: 5px;
+      text-align: center;
+      cursor: pointer;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      background: #f9f9f9;
+      transition: background 0.2s;
+    }
+
+    .library-item:hover {
+      background: #e0e0e0;
+    }
+
+    /* 🎛 컨트롤 패널 (라이브러리 오른쪽으로 이동) */
+    .controls-container {
+      width: calc(100% - 200px); /* 라이브러리 패널 제외한 너비 */
+      margin-left: 200px; /* 🎯 라이브러리 패널과 겹치지 않도록 조정 */
+      display: flex;
+      justify-content: center;
+      padding: 10px 0;
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.1);
+      position: fixed;
+      top: 0;
+      left: 200px; /* 🎯 라이브러리 패널 다음 위치로 이동 */
+      z-index: 10;
+    }
+
+    .controls {
       display: flex;
       gap: 10px;
-      background: rgba(255, 255, 255, 0.8); /* 약간 투명한 배경 */
+      background: rgba(255, 255, 255, 0.8);
       padding: 5px 10px;
       border-radius: 5px;
       box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+      width: auto;
     }
 
     .controls input,
@@ -39,32 +82,64 @@
       cursor: pointer;
     }
 
-    /* 🎯 저장 버튼을 오른쪽 끝으로 정렬 */
     .save-btn {
-      margin-left: auto; /* 왼쪽 요소들과의 간격을 자동으로 설정하여 우측 정렬 */
+      margin-left: auto; /* 🎯 저장 버튼을 오른쪽 정렬 */
     }
-    </style>
-  </head>
+
+    /* 🎨 메인 레이아웃 (캔버스 컨테이너) */
+    .main-container {
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      margin-left: 200px; /* 🎯 라이브러리 패널과 겹치지 않게 조정 */
+      padding-top: 0px; /* 🎯 컨트롤 패널과 캔버스가 겹치지 않도록 조정 */
+    }
+
+    .canvas-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    canvas {
+      border: 1px solid black;
+      display: block;
+    }
+  </style>
+</head>
 
 <body>
-	<div class="canvas-container">
-    <!-- 컨트롤 패널 (캔버스 위에 위치) -->
-		<div class="controls">
-			<input type="color" id="color-picker" value="#0000FF">
-			<input type="range" id="line-width" min="1" max="10" value="2"> <!-- 선 굵기 조절 -->
-			<button id="clear-btn">지우기</button>
-      <button id="save-btn" class="save-btn">저장</button> <!-- 🎯 저장 버튼 추가 -->
-		</div>
+    <!-- 🎯 왼쪽 라이브러리 패널 -->
+    <div class="library-panel">
+        <h3>📁 라이브러리</h3>
+        <div class="library-item" onclick="alert('SVG 1 선택됨')">SVG 파일 1</div>
+        <div class="library-item" onclick="alert('SVG 2 선택됨')">SVG 파일 2</div>
+        <div class="library-item" onclick="alert('SVG 3 선택됨')">SVG 파일 3</div>
+    </div>
 
-		<!-- 캔버스 -->
-		<canvas id="drawing-canvas" width="1024" height="768"></canvas>
-	</div>
-  
-	<script type="module">
-		import init from './pkg/vector_drawing_webapp.js';
-		init().then(() => {
+    <!-- 🎨 중앙 캔버스 컨테이너 -->
+    <div class="main-container">
+      <div class="controls">
+          <input type="color" id="color-picker" value="#0000FF">
+          <input type="range" id="line-width" min="1" max="10" value="2">
+          <button id="clear-btn">지우기</button>
+          <button id="save-btn" class="save-btn">저장</button>
+      </div>
+
+        <div class="canvas-container">
+            <!-- 캔버스 -->
+            <canvas id="drawing-canvas" width="1024" height="768"></canvas>
+        </div>
+    </div>
+
+    <script type="module">
+        import init from './pkg/vector_drawing_webapp.js';
+        init().then(() => {
             start();
         });
-	</script>
+    </script>
 </body>
 </html>
