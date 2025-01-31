@@ -1,24 +1,19 @@
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = { version = "0.2" }
-getrandom = { version = "0.2.2", features = ["js"] }
-
 [package]
-name = "slint-rust-template"
+name = "flo_drawing_webapp"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-slint = "1.8.0"
+flo_canvas = "0.3.1"
+flo_render = "0.3.1"
+flo_binding = "2.2.0"
+wasm-bindgen = "0.2"
+log = "0.4"
+console_log = "1.0.0"
 
 [lib]
-path="src/lib.rs"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
-[dependencies.wasm-bindgen]
-version = "0.2"
-features = ["serde-serialize"]
-
-[build-dependencies]
-slint-build = "1.8.0"
+[dependencies.web-sys]
+version = "0.3.77"
+features = ["Window", "Document", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "MouseEvent", "WheelEvent", "KeyboardEvent", "CanvasRenderingContext2d", "DomRect"]

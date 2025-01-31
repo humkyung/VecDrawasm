@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>숨은 그림 찾기</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #f0f0f0;
+    }
+    canvas {
+      border: 1px solid black;
+	  display: block;
+    }
+	
+	.controls {
+      position: absolute;
+      top: 10px; /* 캔버스 상단에서 10px */
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.8); /* 약간 투명한 배경 */
+      padding: 5px 10px;
+      border-radius: 5px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    }
+
+    .controls input,
+    .controls button {
+      padding: 5px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+
+<body>
+	<div class="canvas-container">
+    <!-- 컨트롤 패널 (캔버스 위에 위치) -->
+		<div class="controls">
+			<input type="color" id="color-picker" value="#0000FF">
+			<input type="range" id="line-width" min="1" max="10" value="2"> <!-- 선 굵기 조절 -->
+			<button id="clear-btn">지우기</button>
+		</div>
+
+		<!-- 캔버스 -->
+		<canvas id="drawing-canvas" width="1024" height="768"></canvas>
+	</div>
+  
+	<script type="module">
+		import init from './pkg/flo_drawing_webapp.js';
+		init().then(() => {
+            start();
+        });
+	</script>
+</body>
+</html>
