@@ -1,7 +1,7 @@
 use log::info;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlInputElement, MouseEvent, WheelEvent};
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlInputElement, HtmlImageElement, MouseEvent, WheelEvent, DragEvent, FileReader};
 use std::rc::Rc;
 use std::cell::RefCell;
 
@@ -99,8 +99,72 @@ pub fn start() -> Result<(), JsValue> {
         shapes.borrow_mut().push(Box::new(Line::new("#0000ff".to_string(), *line_width.borrow(), start, end)));
     });
 
-    // 초기 선 그리기
-    //redraw(&offscreen_context, *scale.borrow(), offset.borrow().0, offset.borrow().1);
+    // 🎨 드래그 앤 드롭 이벤트 추가
+    let canvas_clone = Rc::new(canvas.clone());
+    let context_clone = Rc::new(context.clone());
+
+    // ⬇️ `dragover` 이벤트: 기본 동작 방지하여 드롭 가능하게 함
+    {
+        let closure = Closure::wrap(Box::new(move |event: DragEvent| {
+            event.prevent_default();
+        }) as Box<dyn FnMut(_)>);
+
+        canvas.add_event_listener_with_callback("dragover", closure.as_ref().unchecked_ref())?;
+        closure.forget();
+    }
+
+    // ⬇️ `drop` 이벤트: 파일을 읽어서 Canvas에 로드
+    {
+        let context_clone = Rc::clone(&context_clone);
+
+        let closure = Closure::wrap(Box::new(move |event: DragEvent| {
+            event.prevent_default();
+
+            /*
+            if let Some(data_transfer) = event.data_transfer() {
+                if let files = data_transfer.get_files().unwrap() {
+                    if let Some(file) = files.item(0) {
+                        let file_type = file.type_();
+
+                        // ✅ SVG 파일만 허용
+                        if file_type == "image/svg+xml" {
+                            let reader = FileReader::new();
+                            let reader_clone = reader.clone().unwrap();
+
+                            let onload_closure = Closure::wrap(Box::new(move |_: web_sys::Event| {
+                                if let Ok(result) = reader_clone.result().as_ref().unwrap().as_string() {
+                                    if let Some(svg_data) = result.as_string() {
+                                        let img = HtmlImageElement::new().unwrap();
+                                        let img_clone = img.clone();
+                                        let context_clone = Rc::clone(&context_clone);
+                                        let canvas_clone = Rc::clone(&canvas_clone);
+
+                                        let onload_img = Closure::wrap(Box::new(move || {
+                                            // 캔버스 클리어 후 이미지 그리기
+                                            context_clone.clear_rect(0.0, 0.0, canvas_clone.width() as f64, canvas_clone.height() as f64);
+                                            context_clone.draw_image_with_html_image_element(&img_clone, 0.0, 0.0).unwrap();
+                                        }) as Box<dyn FnMut()>);
+
+                                        // SVG 데이터를 data URL로 설정
+                                        img.set_src(&format!("data:image/svg+xml,{}", svg_data));
+                                        img.set_onload(Some(onload_img.as_ref().unchecked_ref()));
+                                        onload_img.forget();
+                                    }
+                                }
+                            }) as Box<dyn FnMut(_)>);
+
+                            reader.expect("REASON").set_onload(Some(onload_closure.as_ref().unchecked_ref()));
+                            reader.read_as_text(&file).unwrap();
+                            onload_closure.forget();
+                        }
+                    }
+                }
+            }*/
+        }) as Box<dyn FnMut(_)>);
+
+        canvas.add_event_listener_with_callback("drop", closure.as_ref().unchecked_ref())?;
+        closure.forget();
+    }
 
     // 마우스 휠 이벤트 (줌)
     {
@@ -436,34 +500,6 @@ fn redraw(context: &CanvasRenderingContext2d, offscreen_canvas: &HtmlCanvasEleme
     let canvas_width = canvas.width() as f64;
     let canvas_height = canvas.height() as f64;
     info!("redraw: canvas size=({canvas_width}, {canvas_height})"); // 값을 콘솔에 출력
-
-    let offscreen_context = offscreen_canvas
-        .get_context("2d")
-        .unwrap()
-        .unwrap()
-        .dyn_into::<CanvasRenderingContext2d>()
-        .unwrap();
-
-    // 1️⃣ 오프스크린 캔버스를 메인 캔버스와 동일한 크기로 설정
-    offscreen_canvas.set_width(canvas.width());
-    offscreen_canvas.set_height(canvas.height());
-
-    // 2️⃣ 오프스크린 캔버스를 깨끗이 지우기
-    offscreen_context.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).unwrap();
-    offscreen_context.clear_rect(0.0, 0.0, canvas_width, canvas_height);
-
-    ///offscreen_context.set_transform(scale, 0.0, 0.0, scale, offset_x, offset_y).unwrap();
-
-    // 3️⃣ 배경색 설정
-    offscreen_context.set_fill_style(&"#ffffff".into());
-    offscreen_context.fill_rect(0.0, 0.0, canvas_width, canvas_height);
-
-    // 4️⃣ 기존 도형을 오프스크린 캔버스에 그리기
-    /*SHAPES.with(|shapes| {
-        for shape in shapes.borrow().iter() {
-            shape.draw(&offscreen_context);
-        }
-    });*/
 
     // 잔상 방지를 위해 전체 캔버스를 리셋
     context.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).unwrap(); // 변환 초기화

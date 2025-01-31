@@ -38,8 +38,13 @@
       border-radius: 3px;
       cursor: pointer;
     }
-  </style>
-</head>
+
+    /* 🎯 저장 버튼을 오른쪽 끝으로 정렬 */
+    .save-btn {
+      margin-left: auto; /* 왼쪽 요소들과의 간격을 자동으로 설정하여 우측 정렬 */
+    }
+    </style>
+  </head>
 
 <body>
 	<div class="canvas-container">
@@ -48,6 +53,7 @@
 			<input type="color" id="color-picker" value="#0000FF">
 			<input type="range" id="line-width" min="1" max="10" value="2"> <!-- 선 굵기 조절 -->
 			<button id="clear-btn">지우기</button>
+      <button id="save-btn" class="save-btn">저장</button> <!-- 🎯 저장 버튼 추가 -->
 		</div>
 
 		<!-- 캔버스 -->
@@ -55,7 +61,7 @@
 	</div>
   
 	<script type="module">
-		import init from './pkg/flo_drawing_webapp.js';
+		import init from './pkg/vector_drawing_webapp.js';
 		init().then(() => {
             start();
         });

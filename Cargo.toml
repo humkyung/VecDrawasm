@@ -1,12 +1,9 @@
 [package]
-name = "flo_drawing_webapp"
+name = "vector_drawing_webapp"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-flo_canvas = "0.3.1"
-flo_render = "0.3.1"
-flo_binding = "2.2.0"
 wasm-bindgen = "0.2"
 log = "0.4"
 console_log = "1.0.0"
@@ -16,4 +13,5 @@ crate-type = ["cdylib"]
 
 [dependencies.web-sys]
 version = "0.3.77"
-features = ["Window", "Document", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "MouseEvent", "WheelEvent", "KeyboardEvent", "CanvasRenderingContext2d", "DomRect"]
+features = ["Window", "Document", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "HtmlImageElement", "MouseEvent", "WheelEvent", "KeyboardEvent"
+, "CanvasRenderingContext2d", "DomRect", "DragEvent", "DataTransfer", "FileReader"]
