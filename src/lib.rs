@@ -193,7 +193,19 @@ pub fn start() -> Result<(), JsValue> {
     fn render_svg_to_canvas(context: &CanvasRenderingContext2d, _canvas: &HtmlCanvasElement, svg_element: &Element, x: f64, y: f64) {
         let path = Path2d::new().unwrap();
 
-        let paths = svg_element.query_selector("path").unwrap();
+        let paths = match svg_element.query_selector("path") { // SVG 요소에서 path 요소 가져오기
+            Ok(paths) => paths,
+            Err(_) => {
+                info!("Failed to querySelector");
+                return;
+            }
+        };
+
+        if paths.is_none() {
+            web_sys::console::log_1(&"⚠️ SVG 내부에 path 요소가 없음".into());
+            return;
+        }
+
         if let Some(path_element) = paths {
             if let Some(d_attr) = path_element.get_attribute("d") {
                 path.add_path(&Path2d::new_with_path_string(&d_attr).unwrap());
