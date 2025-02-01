@@ -1,12 +1,17 @@
 use log::info;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlInputElement, HtmlImageElement, MouseEvent, WheelEvent, DragEvent, FileReader};
+use web_sys::Document;
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlInputElement, HtmlImageElement, MouseEvent, WheelEvent, DragEvent, FileReader, Element, Path2d, HtmlDivElement
+    , DomParser, HtmlElement};
 use std::rc::Rc;
 use std::cell::RefCell;
 
 pub mod shape;
 use crate::shape::{Shape, Point2D, Pencil, Line};
+
+pub mod state;
+use crate::state::State;
 
 // SHAPES 벡터 정의
 thread_local! {
@@ -59,13 +64,11 @@ pub fn start() -> Result<(), JsValue> {
         .dyn_into::<CanvasRenderingContext2d>()?;
 
     // 초기 캔버스 상태
-    let scale = Rc::new(RefCell::new(1.0)); // 초기 줌 레벨
     let offset = Rc::new(RefCell::new((0.0, 0.0))); // 초기 X 오프셋
     let is_panning = Rc::new(RefCell::new(false));
     let is_drawing = Rc::new(RefCell::new(false)); // 드로잉 상태
     let last_mouse_pos = Rc::new(RefCell::new((0.0, 0.0)));
-    let color = Rc::new(RefCell::new(String::from("#0000FF"))); // 기본 색상: 파란색
-    let line_width = Rc::new(RefCell::new(2.0)); // 기본 선 굵기
+    let state = Rc::new(RefCell::new(State::new("#0000FF".to_string(), 2.0)));
 
     let animation_requested = Rc::new(RefCell::new(false));
 
@@ -84,19 +87,19 @@ pub fn start() -> Result<(), JsValue> {
     SHAPES.with(|shapes| {
         let start = shape::Point2D { x: 0.0, y: 0.0 };
         let end = shape::Point2D { x: canvas.width() as f64, y: 0.0 };
-        shapes.borrow_mut().push(Box::new(Line::new("#0000ff".to_string(), *line_width.borrow(), start, end)));
+        shapes.borrow_mut().push(Box::new(Line::new("#0000ff".to_string(), state.borrow().line_width(), start, end)));
 
         let start = shape::Point2D { x: canvas.width() as f64, y: 0.0 };
         let end = shape::Point2D { x: canvas.width() as f64, y: canvas.height() as f64 };
-        shapes.borrow_mut().push(Box::new(Line::new("#0000ff".to_string(), *line_width.borrow(), start, end)));
+        shapes.borrow_mut().push(Box::new(Line::new("#0000ff".to_string(), state.borrow().line_width(), start, end)));
 
         let start = shape::Point2D { x: canvas.width() as f64, y: canvas.height() as f64 };
         let end = shape::Point2D { x: 0.0, y: canvas.height() as f64 };
-        shapes.borrow_mut().push(Box::new(Line::new("#0000ff".to_string(), *line_width.borrow(), start, end)));
+        shapes.borrow_mut().push(Box::new(Line::new("#0000ff".to_string(), state.borrow().line_width(), start, end)));
 
         let start = shape::Point2D { x: 0.0, y: canvas.height() as f64 };
         let end = shape::Point2D { x: 0.0, y: 0.0 };
-        shapes.borrow_mut().push(Box::new(Line::new("#0000ff".to_string(), *line_width.borrow(), start, end)));
+        shapes.borrow_mut().push(Box::new(Line::new("#0000ff".to_string(), state.borrow().line_width(), start, end)));
     });
 
     // 🎨 드래그 앤 드롭 이벤트 추가
@@ -115,14 +118,34 @@ pub fn start() -> Result<(), JsValue> {
 
     // ⬇️ `drop` 이벤트: 파일을 읽어서 Canvas에 로드
     {
+        let library_panel: HtmlDivElement = document
+            .get_element_by_id("library-panel")
+            .unwrap()
+            .dyn_into::<HtmlDivElement>()?;
+
+        let library_panel_clone = Rc::new(library_panel.clone());
+
         let context_clone = Rc::clone(&context_clone);
+        let document_clone = Rc::new(document.clone());
 
         let closure = Closure::wrap(Box::new(move |event: DragEvent| {
             event.prevent_default();
 
-            /*
             if let Some(data_transfer) = event.data_transfer() {
-                if let files = data_transfer.get_files().unwrap() {
+                if let Ok(svg_data) = data_transfer.get_data("text/plain") {
+                    info!("drop svg"); // 값을 콘솔에 출력
+
+                    let svg_element: Element = document_clone
+                        .create_element("div")
+                        .unwrap();
+                    svg_element.set_inner_html(&svg_data);
+
+                    info!("render svg"); // 값을 콘솔에 출력
+                    let rect = canvas_clone.get_bounding_client_rect();
+                    let drop_x = event.client_x() as f64 - rect.left();
+                    let drop_y = event.client_y() as f64 - rect.top();
+                    render_svg_to_canvas(&context_clone, &canvas_clone, &svg_element, drop_x, drop_y);
+                }/* else if let files = data_transfer.get_files().unwrap() {
                     if let Some(file) = files.item(0) {
                         let file_type = file.type_();
 
@@ -158,22 +181,39 @@ pub fn start() -> Result<(), JsValue> {
                             onload_closure.forget();
                         }
                     }
-                }
-            }*/
+                }*/
+            }
         }) as Box<dyn FnMut(_)>);
 
         canvas.add_event_listener_with_callback("drop", closure.as_ref().unchecked_ref())?;
         closure.forget();
     }
 
+    // 🎯 Canvas에 SVG를 벡터로 렌더링
+    fn render_svg_to_canvas(context: &CanvasRenderingContext2d, _canvas: &HtmlCanvasElement, svg_element: &Element, x: f64, y: f64) {
+        let path = Path2d::new().unwrap();
+
+        let paths = svg_element.query_selector("path").unwrap();
+        if let Some(path_element) = paths {
+            if let Some(d_attr) = path_element.get_attribute("d") {
+                path.add_path(&Path2d::new_with_path_string(&d_attr).unwrap());
+            }
+        }
+
+        context.set_fill_style(&JsValue::from_str("black"));
+        context.translate(x, y).unwrap();
+        context.fill_with_path_2d(&path);
+        context.stroke_with_path(&path);
+    }
+
     // 마우스 휠 이벤트 (줌)
     {
         let canvas_size = (canvas.width(), canvas.height());
-        let scale_clone = Rc::clone(&scale);
         let offset_clone = Rc::clone(&offset);
         let context_clone = Rc::new(context.clone());
         let offscreen_context = Rc::new(offscreen_context.clone());
         let offscreen_canvas= Rc::new(offscreen_canvas.clone());
+        let state_clone = Rc::clone(&state);
 
         let client_rect = canvas.get_bounding_client_rect();
 
@@ -183,8 +223,9 @@ pub fn start() -> Result<(), JsValue> {
             event.prevent_default();
 
             // 마우스 휠 방향에 따라 줌 인/아웃
+            let scale= state_clone.borrow().scale();
             let zoom_factor = if event.delta_y() < 0.0 { 1.1 } else { 0.9 };
-            *scale_clone.borrow_mut() *= zoom_factor;
+            state_clone.borrow_mut().set_scale(scale * zoom_factor);
 
             // 마우스 위치를 기준으로 캔버스 중심 이동
             let mouse_x = event.client_x() as f64 - client_rect.left();
@@ -202,23 +243,20 @@ pub fn start() -> Result<(), JsValue> {
             context_clone.fill_rect(0.0, 0.0, client_rect.width(), client_rect.height());
 
             // 캔버스 다시 그리기
-            let _ = context_clone.set_transform( *scale_clone.borrow(), 0.0, 0.0, *scale_clone.borrow(), offset_x, offset_y,);
-            redraw(&context_clone, &offscreen_canvas, *scale_clone.borrow(), offset_x, offset_y);
-
-            //let _ = offscreen_context.set_transform( *scale.borrow(), 0.0, 0.0, *scale.borrow(), offset_x, offset_y,);
-            //redraw(&offscreen_context, *scale.borrow(), offset_x, offset_y);
+            let _ = context_clone.set_transform( state_clone.borrow().scale(), 0.0, 0.0, state_clone.borrow().scale(), offset_x, offset_y,);
+            redraw(&context_clone, &offscreen_canvas, state_clone.borrow().scale(), offset_x, offset_y);
         })?;
     }
 
     // 마우스 다운 이벤트 (팬 시작)
     { 
-        let scale_clone = Rc::clone(&scale);
         let offset_clone = Rc::clone(&offset);
 
         let is_panning_clone = Rc::clone(&is_panning);
         let is_drawing = Rc::clone(&is_drawing);
         let last_mouse_pos = Rc::clone(&last_mouse_pos);
         let client_rect = canvas.get_bounding_client_rect();
+        let state_clone = Rc::clone(&state);
 
         let mouse_context_points= Rc::clone(&mouse_context_points);
 
@@ -240,7 +278,7 @@ pub fn start() -> Result<(), JsValue> {
             let window = web_sys::window().unwrap();
             let scroll_x = window.scroll_x().unwrap_or(0.0);
             let scroll_y = window.scroll_y().unwrap_or(0.0);
-            let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y), *scale_clone.borrow(), offset_x, offset_y);
+            let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y), state_clone.borrow().scale(), offset_x, offset_y);
             mouse_context_points.borrow_mut().push(Point2D { x: current_x, y: current_y });
 
             info!("mousedown, is_panning={}, is_drawing={}", *is_panning_clone.borrow(), *is_drawing.borrow()); // 값을 콘솔에 출력
@@ -258,12 +296,11 @@ pub fn start() -> Result<(), JsValue> {
         let canvas_size = (canvas.width(), canvas.height());
         let client_rect = canvas.get_bounding_client_rect();
 
-        let scale_clone = Rc::clone(&scale);
         let offset_clone = Rc::clone(&offset);
         let is_panning_clone = Rc::clone(&is_panning);
         let is_drawing = Rc::clone(&is_drawing);
         let last_mouse_pos = Rc::clone(&last_mouse_pos);
-        let color_clone = Rc::clone(&color);
+        let state_clone = Rc::clone(&state);
 
         let mouse_context_points= Rc::clone(&mouse_context_points);
 
@@ -358,18 +395,17 @@ pub fn start() -> Result<(), JsValue> {
                     // 잔상 방지를 위해 전체 캔버스를 리셋
                     context_clone.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).unwrap(); // 변환 초기화
                     context_clone.clear_rect(0.0, 0.0, client_rect.width(), client_rect.height()); // 전체 캔버스 지우기
-                    context_clone.set_fill_style(&JsValue::from_str(color_clone.borrow().as_str()));
+                    context_clone.set_fill_style(&JsValue::from_str(state_clone.borrow().color()));
                     context_clone.fill_rect(0.0, 0.0, client_rect.width(), client_rect.height());
 
                     // 캔버스 다시 그리기
 
-                    let _ = context_clone.set_transform(*scale_clone.borrow(), 0.0, 0.0, *scale_clone.borrow(), offset_x, offset_y);
+                    let _ = context_clone.set_transform(state_clone.borrow().scale(), 0.0, 0.0, state_clone.borrow().scale(), offset_x, offset_y);
                     let draw_x = 0.0;
                     let draw_y = 0.0;
-                    let _ = offscreen_context.set_transform(*scale_clone.borrow(), 0.0, 0.0, *scale_clone.borrow(), offset_x, offset_y);
+                    let _ = offscreen_context.set_transform(state_clone.borrow().scale(), 0.0, 0.0, state_clone.borrow().scale(), offset_x, offset_y);
 
-                    //context_clone.draw_image_with_html_canvas_element(&offscreen_canvas, draw_x, draw_y).unwrap();
-                    redraw(&context_clone, &offscreen_canvas, *scale_clone.borrow(), offset_x, offset_y);
+                    redraw(&context_clone, &offscreen_canvas, state_clone.borrow().scale(), offset_x, offset_y);
 
                     *animation_requested_clone.borrow_mut() = false;
 
@@ -380,10 +416,10 @@ pub fn start() -> Result<(), JsValue> {
                 let scroll_x = window.scroll_x().unwrap_or(0.0);
                 let scroll_y = window.scroll_y().unwrap_or(0.0);
 
-                let (last_x, last_y) = calculate_canvas_coordinates((last_x, last_y), (scroll_x, scroll_y), *scale_clone.borrow(), offset_x, offset_y);
-                let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y), *scale_clone.borrow(), offset_x, offset_y);
+                let (last_x, last_y) = calculate_canvas_coordinates((last_x, last_y), (scroll_x, scroll_y), state_clone.borrow().scale(), offset_x, offset_y);
+                let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y), state_clone.borrow().scale(), offset_x, offset_y);
 
-                context_clone.set_stroke_style(&JsValue::from_str(color_clone.borrow().as_str()));
+                context_clone.set_stroke_style(&JsValue::from_str(state_clone.borrow().color()));
                 context_clone.begin_path();
                 context_clone.move_to(last_x, last_y);
                 context_clone.line_to(current_x, current_y);
@@ -405,9 +441,7 @@ pub fn start() -> Result<(), JsValue> {
         let offscreen_canvas= Rc::new(offscreen_canvas.clone());
         let is_panning_clone = Rc::clone(&is_panning);
         let is_drawing = Rc::clone(&is_drawing);
-        let scale_clone = Rc::clone(&scale);
-        let color_clone = Rc::clone(&color);
-        let line_width_clone = Rc::clone(&line_width);
+        let state_clone = Rc::clone(&state);
 
         let mouse_context_points= Rc::clone(&mouse_context_points);
 
@@ -415,7 +449,7 @@ pub fn start() -> Result<(), JsValue> {
             *is_panning_clone.borrow_mut() = false;
             *is_drawing.borrow_mut() = false;
 
-            let pencil = Pencil::new(color_clone.borrow().clone(), *line_width_clone.borrow(), mouse_context_points.borrow().clone());
+            let pencil = Pencil::new(state_clone.borrow().color().to_string(), state_clone.borrow().line_width(), mouse_context_points.borrow().clone());
             SHAPES.with(|shapes| {
                 shapes.borrow_mut().push(Box::new(pencil));
             });
@@ -424,7 +458,7 @@ pub fn start() -> Result<(), JsValue> {
 
             let (offset_x, offset_y) = *offset_clone.borrow();
 
-            redraw(&context_clone, &offscreen_canvas, *scale_clone.borrow(), offset_x, offset_y);
+            redraw(&context_clone, &offscreen_canvas, state_clone.borrow().scale(), offset_x, offset_y);
 
             let num_shapes = SHAPES.with(|shapes| shapes.borrow().len());
             info!("mouseup: number of shapes={num_shapes}"); // 값을 콘솔에 출력
@@ -433,13 +467,13 @@ pub fn start() -> Result<(), JsValue> {
 
     // 색상 선택 이벤트
     {
-        let color_clone = Rc::clone(&color);
+        let state_clone = Rc::clone(&state);
         let closure = Closure::wrap(Box::new(move |event: web_sys::Event| {
             if let Some(target) = event.target() {
                 if let Ok(input) = target.dyn_into::<HtmlInputElement>() {
-                    *color_clone.borrow_mut() = input.value();
+                    state_clone.borrow_mut().set_color(&input.value());
             
-                    info!("Color changed to ={}", *color_clone.borrow()); // 값을 콘솔에 출력
+                    info!("Color changed to ={}", state_clone.borrow().color()); // 값을 콘솔에 출력
                 }
             }
         }) as Box<dyn FnMut(_)>);
@@ -451,14 +485,14 @@ pub fn start() -> Result<(), JsValue> {
 
     // ✏️ **선 굵기 변경 이벤트 리스너 등록**
     {
-        let line_width_clone = Rc::clone(&line_width);
+        let state_clone = Rc::clone(&state);
 
         let closure = Closure::wrap(Box::new(move |event: web_sys::Event| {
             if let Some(target) = event.target() {
                 if let Ok(input) = target.dyn_into::<HtmlInputElement>() {
                     if let Ok(value) = input.value().parse::<f64>() {
-                        *line_width_clone.borrow_mut() = value;
-                        info!("Line width changed to: {}", *line_width_clone.borrow()); // 콘솔 출력
+                        state_clone.borrow_mut().set_line_width(value);
+                        info!("Line width changed to: {}", state_clone.borrow().line_width()); // 콘솔 출력
                     }
                 }
             }
@@ -474,8 +508,8 @@ pub fn start() -> Result<(), JsValue> {
     // 지우기 버튼 이벤트
     {
         let context_clone = Rc::new(context.clone());
-        let scale_clone = Rc::clone(&scale);
         let offset_clone = Rc::clone(&offset);
+        let state_clone = Rc::clone(&state);
 
         let closure = Closure::wrap(Box::new(move |_event: web_sys::MouseEvent| {
             SHAPES.with(|shapes| {
@@ -483,7 +517,7 @@ pub fn start() -> Result<(), JsValue> {
             });
 
             let (offset_x, offset_y) = *offset_clone.borrow();
-            redraw(&context_clone, &offscreen_canvas, *scale_clone.borrow(), offset_x, offset_y);
+            redraw(&context_clone, &offscreen_canvas, state_clone.borrow().scale(), offset_x, offset_y);
         }) as Box<dyn FnMut(_)>);
 
         let clear_button = document.get_element_by_id("clear-btn").unwrap();

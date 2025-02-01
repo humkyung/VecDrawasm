@@ -27,6 +27,7 @@
       left: 0;
       top: 0;
       bottom: 0;
+      overflow-y: auto;
     }
 
     .library-panel h3 {
@@ -45,8 +46,20 @@
       transition: background 0.2s;
     }
 
+    .library-item img {
+      width: 80%;
+      max-height: 80px;
+      object-fit: contain;
+    }
+
     .library-item:hover {
       background: #e0e0e0;
+    }
+
+    /* 🎨 드래그 앤 드롭 스타일 */
+    .library-panel.dragover {
+      border: 2px dashed #007bff;
+      background: #e0f7ff;
     }
 
     /* 🎛 컨트롤 패널 (라이브러리 오른쪽으로 이동) */
@@ -112,12 +125,10 @@
 </head>
 
 <body>
-    <!-- 🎯 왼쪽 라이브러리 패널 -->
-    <div class="library-panel">
+    <!-- 🎯 왼쪽 라이브러리 패널 (드래그 앤 드롭 가능) -->
+    <div class="library-panel" id="library-panel">
         <h3>📁 라이브러리</h3>
-        <div class="library-item" onclick="alert('SVG 1 선택됨')">SVG 파일 1</div>
-        <div class="library-item" onclick="alert('SVG 2 선택됨')">SVG 파일 2</div>
-        <div class="library-item" onclick="alert('SVG 3 선택됨')">SVG 파일 3</div>
+        <p>SVG 파일을 여기에 드래그하세요</p>
     </div>
 
     <!-- 🎨 중앙 캔버스 컨테이너 -->
@@ -134,6 +145,55 @@
             <canvas id="drawing-canvas" width="1024" height="768"></canvas>
         </div>
     </div>
+
+    <script>
+        const libraryPanel = document.getElementById("library-panel");
+        const canvas = document.getElementById("drawing-canvas");
+        const ctx = canvas.getContext("2d");
+
+        // 🎯 드래그 앤 드롭 이벤트 추가
+        libraryPanel.addEventListener("dragover", (event) => {
+            event.preventDefault();
+            libraryPanel.classList.add("dragover");
+        });
+
+        libraryPanel.addEventListener("dragleave", () => {
+            libraryPanel.classList.remove("dragover");
+        });
+
+        libraryPanel.addEventListener("drop", (event) => {
+            event.preventDefault();
+            libraryPanel.classList.remove("dragover");
+
+            const files = event.dataTransfer.files;
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+
+                if (file.type === "image/svg+xml") {
+                    const reader = new FileReader();
+                    reader.onload = function (e) {
+                        addSvgToLibrary(e.target.result);
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    alert("SVG 파일만 업로드할 수 있습니다.");
+                }
+            }
+        });
+
+        // 🎯 라이브러리에 SVG 추가
+        function addSvgToLibrary(svgDataUrl) {
+            const item = document.createElement("div");
+            item.classList.add("library-item");
+
+            const img = document.createElement("img");
+            img.src = svgDataUrl;
+            img.alt = "SVG Thumbnail";
+            item.appendChild(img);
+
+            libraryPanel.appendChild(item);
+        }
+    </script>    
 
     <script type="module">
         import init from './pkg/vector_drawing_webapp.js';
