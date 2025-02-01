@@ -1,14 +1,13 @@
 use log::info;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::Document;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlInputElement, HtmlImageElement, MouseEvent, WheelEvent, DragEvent, FileReader, Element, Path2d, HtmlDivElement
-    , DomParser, HtmlElement};
+use web_sys::{Document, CanvasRenderingContext2d, HtmlCanvasElement, HtmlInputElement, HtmlImageElement, MouseEvent, WheelEvent, DragEvent, FileReader, Element, Path2d
+    , HtmlDivElement , DomParser, HtmlElement, Node, NodeList};
 use std::rc::Rc;
 use std::cell::RefCell;
 
 pub mod shape;
-use crate::shape::{Shape, Point2D, Pencil, Line};
+use crate::shape::{Shape, Point2D, Pencil, Line, Svg};
 
 pub mod state;
 use crate::state::State;
@@ -133,18 +132,13 @@ pub fn start() -> Result<(), JsValue> {
 
             if let Some(data_transfer) = event.data_transfer() {
                 if let Ok(svg_data) = data_transfer.get_data("text/plain") {
-                    info!("drop svg"); // 값을 콘솔에 출력
-
-                    let svg_element: Element = document_clone
-                        .create_element("div")
-                        .unwrap();
-                    svg_element.set_inner_html(&svg_data);
+                    info!("svg data={svg_data}"); // 값을 콘솔에 출력
 
                     info!("render svg"); // 값을 콘솔에 출력
                     let rect = canvas_clone.get_bounding_client_rect();
                     let drop_x = event.client_x() as f64 - rect.left();
                     let drop_y = event.client_y() as f64 - rect.top();
-                    render_svg_to_canvas(&context_clone, &canvas_clone, &svg_element, drop_x, drop_y);
+                    render_svg_to_canvas(&context_clone, &canvas_clone, &svg_data, drop_x, drop_y);
                 }/* else if let files = data_transfer.get_files().unwrap() {
                     if let Some(file) = files.item(0) {
                         let file_type = file.type_();
@@ -190,32 +184,13 @@ pub fn start() -> Result<(), JsValue> {
     }
 
     // 🎯 Canvas에 SVG를 벡터로 렌더링
-    fn render_svg_to_canvas(context: &CanvasRenderingContext2d, _canvas: &HtmlCanvasElement, svg_element: &Element, x: f64, y: f64) {
-        let path = Path2d::new().unwrap();
-
-        let paths = match svg_element.query_selector("path") { // SVG 요소에서 path 요소 가져오기
-            Ok(paths) => paths,
-            Err(_) => {
-                info!("Failed to querySelector");
-                return;
-            }
-        };
-
-        if paths.is_none() {
-            web_sys::console::log_1(&"⚠️ SVG 내부에 path 요소가 없음".into());
-            return;
-        }
-
-        if let Some(path_element) = paths {
-            if let Some(d_attr) = path_element.get_attribute("d") {
-                path.add_path(&Path2d::new_with_path_string(&d_attr).unwrap());
-            }
-        }
-
-        context.set_fill_style(&JsValue::from_str("black"));
-        context.translate(x, y).unwrap();
-        context.fill_with_path_2d(&path);
-        context.stroke_with_path(&path);
+    #[wasm_bindgen]
+    pub fn render_svg_to_canvas(context: &CanvasRenderingContext2d, _canvas: &Element, svg_data: &str, x: f64, y: f64) {
+        let svg = Svg::new(Point2D::new(x, y), svg_data); 
+        svg.draw(context);
+        SHAPES.with(|shapes| {
+            shapes.borrow_mut().push(Box::new(svg));
+        });
     }
 
     // 마우스 휠 이벤트 (줌)

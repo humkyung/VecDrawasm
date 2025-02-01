@@ -146,7 +146,12 @@
         </div>
     </div>
 
-    <script>
+    <script type="module">
+        import init, {render_svg_to_canvas} from './pkg/vector_drawing_webapp.js';
+        init().then(() => {
+            console.log("WASM loaded.");
+        });
+
         const libraryPanel = document.getElementById("library-panel");
         const canvas = document.getElementById("drawing-canvas");
         const ctx = canvas.getContext("2d");
@@ -174,7 +179,7 @@
                     reader.onload = function (e) {
                         addSvgToLibrary(e.target.result);
                     };
-                    reader.readAsDataURL(file);
+                    reader.readAsText(file);
                 } else {
                     alert("SVG 파일만 업로드할 수 있습니다.");
                 }
@@ -182,24 +187,25 @@
         });
 
         // 🎯 라이브러리에 SVG 추가
-        function addSvgToLibrary(svgDataUrl) {
-            const item = document.createElement("div");
-            item.classList.add("library-item");
+        function addSvgToLibrary(svgData) {
+          const item = document.createElement("div");
+          item.classList.add("library-item");
+          item.setAttribute("draggable", "true");
+          item.setAttribute("data-src", svgData); // 🎯 SVG 원본 데이터 저장
 
-            const img = document.createElement("img");
-            img.src = svgDataUrl;
-            img.alt = "SVG Thumbnail";
-            item.appendChild(img);
+          const img = document.createElement("img");
+          img.src = "data:image/svg+xml," + encodeURIComponent(svgData);
+          img.alt = "SVG Thumbnail";
 
-            libraryPanel.appendChild(item);
+          item.appendChild(img);
+
+          // 🎯 드래그 시작 이벤트
+          item.addEventListener("dragstart", (event) => {
+              event.dataTransfer.setData("text/plain", svgData);
+          });
+
+          libraryPanel.appendChild(item);
         }
     </script>    
-
-    <script type="module">
-        import init from './pkg/vector_drawing_webapp.js';
-        init().then(() => {
-            start();
-        });
-    </script>
 </body>
 </html>
