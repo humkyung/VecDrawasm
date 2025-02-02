@@ -63,7 +63,6 @@ pub fn start() -> Result<(), JsValue> {
         .dyn_into::<CanvasRenderingContext2d>()?;
 
     // 초기 캔버스 상태
-    let offset = Rc::new(RefCell::new((0.0, 0.0))); // 초기 X 오프셋
     let is_panning = Rc::new(RefCell::new(false));
     let is_drawing = Rc::new(RefCell::new(false)); // 드로잉 상태
     let last_mouse_pos = Rc::new(RefCell::new((0.0, 0.0)));
@@ -126,18 +125,20 @@ pub fn start() -> Result<(), JsValue> {
 
         let context_clone = Rc::clone(&context_clone);
         let document_clone = Rc::new(document.clone());
+        let state_clone = Rc::clone(&state);
 
         let closure = Closure::wrap(Box::new(move |event: DragEvent| {
             event.prevent_default();
 
             if let Some(data_transfer) = event.data_transfer() {
                 if let Ok(svg_data) = data_transfer.get_data("text/plain") {
-                    info!("svg data={svg_data}"); // 값을 콘솔에 출력
+                    //info!("svg data={svg_data}"); // 값을 콘솔에 출력
 
                     info!("render svg"); // 값을 콘솔에 출력
                     let rect = canvas_clone.get_bounding_client_rect();
-                    let drop_x = event.client_x() as f64 - rect.left();
-                    let drop_y = event.client_y() as f64 - rect.top();
+                    let mouse_x = event.client_x() as f64 - rect.left();
+                    let mouse_y = event.client_y() as f64 - rect.top();
+                    let (drop_x, drop_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (0.0, 0.0), &*state_clone.borrow());
                     render_svg_to_canvas(&context_clone, &canvas_clone, &svg_data, drop_x, drop_y);
                 }/* else if let files = data_transfer.get_files().unwrap() {
                     if let Some(file) = files.item(0) {
@@ -196,7 +197,6 @@ pub fn start() -> Result<(), JsValue> {
     // 마우스 휠 이벤트 (줌)
     {
         let canvas_size = (canvas.width(), canvas.height());
-        let offset_clone = Rc::clone(&offset);
         let context_clone = Rc::new(context.clone());
         let offscreen_context = Rc::new(offscreen_context.clone());
         let offscreen_canvas= Rc::new(offscreen_canvas.clone());
@@ -218,10 +218,10 @@ pub fn start() -> Result<(), JsValue> {
             let mouse_x = event.client_x() as f64 - client_rect.left();
             let mouse_y = event.client_y() as f64 - client_rect.top();
 
-            let (mut offset_x, mut offset_y) = *offset_clone.borrow();
-            offset_x = mouse_x - zoom_factor * (mouse_x - offset_x);
-            offset_y = mouse_y - zoom_factor * (mouse_y - offset_y);
-            *offset_clone.borrow_mut() = (offset_x, offset_y);
+            let mut offset = *state_clone.borrow().offset();
+            offset.set_x(mouse_x - zoom_factor * (mouse_x - offset.x));
+            offset.set_y(mouse_y - zoom_factor * (mouse_y - offset.y));
+            state_clone.borrow_mut().set_offset(&offset);
 
             // 잔상 방지를 위해 전체 캔버스를 리셋
             context_clone.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).unwrap(); // 변환 초기화
@@ -230,15 +230,13 @@ pub fn start() -> Result<(), JsValue> {
             context_clone.fill_rect(0.0, 0.0, client_rect.width(), client_rect.height());
 
             // 캔버스 다시 그리기
-            let _ = context_clone.set_transform( state_clone.borrow().scale(), 0.0, 0.0, state_clone.borrow().scale(), offset_x, offset_y,);
-            redraw(&context_clone, &offscreen_canvas, state_clone.borrow().scale(), offset_x, offset_y);
+            let _ = context_clone.set_transform( state_clone.borrow().scale(), 0.0, 0.0, state_clone.borrow().scale(), offset.x, offset.y);
+            redraw(&context_clone, &offscreen_canvas, &*state_clone.borrow());
         })?;
     }
 
     // 마우스 다운 이벤트 (팬 시작)
     { 
-        let offset_clone = Rc::clone(&offset);
-
         let is_panning_clone = Rc::clone(&is_panning);
         let is_drawing = Rc::clone(&is_drawing);
         let last_mouse_pos = Rc::clone(&last_mouse_pos);
@@ -261,11 +259,10 @@ pub fn start() -> Result<(), JsValue> {
             let mouse_y = event.client_y() as f64 - client_rect.top();
             *last_mouse_pos.borrow_mut() = (mouse_x, mouse_y);
 
-            let (offset_x, offset_y) = *offset_clone.borrow();
             let window = web_sys::window().unwrap();
             let scroll_x = window.scroll_x().unwrap_or(0.0);
             let scroll_y = window.scroll_y().unwrap_or(0.0);
-            let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y), state_clone.borrow().scale(), offset_x, offset_y);
+            let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y), &*state_clone.borrow());
             mouse_context_points.borrow_mut().push(Point2D { x: current_x, y: current_y });
 
             info!("mousedown, is_panning={}, is_drawing={}", *is_panning_clone.borrow(), *is_drawing.borrow()); // 값을 콘솔에 출력
@@ -283,7 +280,6 @@ pub fn start() -> Result<(), JsValue> {
         let canvas_size = (canvas.width(), canvas.height());
         let client_rect = canvas.get_bounding_client_rect();
 
-        let offset_clone = Rc::clone(&offset);
         let is_panning_clone = Rc::clone(&is_panning);
         let is_drawing = Rc::clone(&is_drawing);
         let last_mouse_pos = Rc::clone(&last_mouse_pos);
@@ -364,7 +360,6 @@ pub fn start() -> Result<(), JsValue> {
         */
         add_event_listener(&canvas, "mousemove", move |event: MouseEvent| {
             let (last_x, last_y) = *last_mouse_pos.borrow();
-            let (mut offset_x, mut offset_y) = *offset_clone.borrow();
 
             let mouse_x = event.client_x() as f64 - client_rect.left();
             let mouse_y = event.client_y() as f64 - client_rect.top();
@@ -373,9 +368,10 @@ pub fn start() -> Result<(), JsValue> {
                 let dx = mouse_x - last_x;
                 let dy = mouse_y - last_y;
 
-                offset_x += dx;
-                offset_y += dy;
-                *offset_clone.borrow_mut() = (offset_x, offset_y);
+                let mut offset = *state_clone.borrow().offset();
+                offset.set_x(offset.x + dx);
+                offset.set_y(offset.y + dy);
+                state_clone.borrow_mut().set_offset(&offset);
 
                 if !*animation_requested_clone.borrow(){
                     *animation_requested_clone.borrow_mut() = true;
@@ -387,12 +383,12 @@ pub fn start() -> Result<(), JsValue> {
 
                     // 캔버스 다시 그리기
 
-                    let _ = context_clone.set_transform(state_clone.borrow().scale(), 0.0, 0.0, state_clone.borrow().scale(), offset_x, offset_y);
+                    let _ = context_clone.set_transform(state_clone.borrow().scale(), 0.0, 0.0, state_clone.borrow().scale(), offset.x, offset.y);
                     let draw_x = 0.0;
                     let draw_y = 0.0;
-                    let _ = offscreen_context.set_transform(state_clone.borrow().scale(), 0.0, 0.0, state_clone.borrow().scale(), offset_x, offset_y);
+                    let _ = offscreen_context.set_transform(state_clone.borrow().scale(), 0.0, 0.0, state_clone.borrow().scale(), offset.x, offset.y);
 
-                    redraw(&context_clone, &offscreen_canvas, state_clone.borrow().scale(), offset_x, offset_y);
+                    redraw(&context_clone, &offscreen_canvas, &*state_clone.borrow());
 
                     *animation_requested_clone.borrow_mut() = false;
 
@@ -403,8 +399,8 @@ pub fn start() -> Result<(), JsValue> {
                 let scroll_x = window.scroll_x().unwrap_or(0.0);
                 let scroll_y = window.scroll_y().unwrap_or(0.0);
 
-                let (last_x, last_y) = calculate_canvas_coordinates((last_x, last_y), (scroll_x, scroll_y), state_clone.borrow().scale(), offset_x, offset_y);
-                let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y), state_clone.borrow().scale(), offset_x, offset_y);
+                let (last_x, last_y) = calculate_canvas_coordinates((last_x, last_y), (scroll_x, scroll_y), &*state_clone.borrow());
+                let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y), &*state_clone.borrow());
 
                 context_clone.set_stroke_style(&JsValue::from_str(state_clone.borrow().color()));
                 context_clone.begin_path();
@@ -424,7 +420,6 @@ pub fn start() -> Result<(), JsValue> {
     // 마우스 업 이벤트 (팬 종료)
     {
         let context_clone = Rc::new(context.clone());
-        let offset_clone = Rc::clone(&offset);
         let offscreen_canvas= Rc::new(offscreen_canvas.clone());
         let is_panning_clone = Rc::clone(&is_panning);
         let is_drawing = Rc::clone(&is_drawing);
@@ -443,9 +438,7 @@ pub fn start() -> Result<(), JsValue> {
 
             mouse_context_points.borrow_mut().clear();
 
-            let (offset_x, offset_y) = *offset_clone.borrow();
-
-            redraw(&context_clone, &offscreen_canvas, state_clone.borrow().scale(), offset_x, offset_y);
+            redraw(&context_clone, &offscreen_canvas, &*state_clone.borrow());
 
             let num_shapes = SHAPES.with(|shapes| shapes.borrow().len());
             info!("mouseup: number of shapes={num_shapes}"); // 값을 콘솔에 출력
@@ -495,7 +488,6 @@ pub fn start() -> Result<(), JsValue> {
     // 지우기 버튼 이벤트
     {
         let context_clone = Rc::new(context.clone());
-        let offset_clone = Rc::clone(&offset);
         let state_clone = Rc::clone(&state);
 
         let closure = Closure::wrap(Box::new(move |_event: web_sys::MouseEvent| {
@@ -503,8 +495,7 @@ pub fn start() -> Result<(), JsValue> {
                 shapes.borrow_mut().clear();
             });
 
-            let (offset_x, offset_y) = *offset_clone.borrow();
-            redraw(&context_clone, &offscreen_canvas, state_clone.borrow().scale(), offset_x, offset_y);
+            redraw(&context_clone, &offscreen_canvas, &*state_clone.borrow());
         }) as Box<dyn FnMut(_)>);
 
         let clear_button = document.get_element_by_id("clear-btn").unwrap();
@@ -516,7 +507,7 @@ pub fn start() -> Result<(), JsValue> {
 }
 
 // 캔버스 다시 그리기
-fn redraw(context: &CanvasRenderingContext2d, offscreen_canvas: &HtmlCanvasElement, scale: f64, offset_x: f64, offset_y: f64) {
+fn redraw(context: &CanvasRenderingContext2d, offscreen_canvas: &HtmlCanvasElement, state: &State) {
     let canvas = context.canvas().unwrap();
     let canvas_width = canvas.width() as f64;
     let canvas_height = canvas.height() as f64;
@@ -529,7 +520,7 @@ fn redraw(context: &CanvasRenderingContext2d, offscreen_canvas: &HtmlCanvasEleme
     context.fill_rect(0.0, 0.0, canvas_width, canvas_height);
 
     // 줌 및 팬 적용 (기존의 scale과 offset 유지)
-    context.set_transform(scale, 0.0, 0.0, scale, offset_x, offset_y).unwrap();
+    context.set_transform(state.scale(), 0.0, 0.0, state.scale(), state.offset().x, state.offset().y).unwrap();
 
     context.clear_rect(0.0, 0.0, canvas_width, canvas_height);
     context.set_fill_style(&"#ffffff".into());
@@ -546,9 +537,9 @@ fn redraw(context: &CanvasRenderingContext2d, offscreen_canvas: &HtmlCanvasEleme
     마우스 이벤트에서 실제 캔버스 좌표를 계산합니다.
     줌 레벨과 PAN 오프셋을 반영합니다.
 */
-fn calculate_canvas_coordinates(mouse_pos: (f64, f64), scroll: (f64, f64), zoom_level: f64, offset_x: f64, offset_y: f64) -> (f64, f64) {
-    let x = (mouse_pos.0 - offset_x - scroll.0) / zoom_level;
-    let y = (mouse_pos.1 - offset_y - scroll.1) / zoom_level;
+fn calculate_canvas_coordinates(mouse_pos: (f64, f64), scroll: (f64, f64), state: &State) -> (f64, f64) {
+    let x = (mouse_pos.0 - state.offset().x - scroll.0) / state.scale();
+    let y = (mouse_pos.1 - state.offset().y - scroll.1) / state.scale();
     return (x, y)
 }
 

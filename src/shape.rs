@@ -4,9 +4,9 @@ use log::info;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use web_sys::{CanvasRenderingContext2d, Document, Element, DomParser, SupportedType, HtmlCanvasElement, MouseEvent, WheelEvent, Path2d};
+use web_sys::{window, CanvasRenderingContext2d, Document, Element, DomParser, CanvasGradient, HtmlCanvasElement, MouseEvent, WheelEvent, Path2d};
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Point2D{
     pub x: f64,
     pub y: f64,
@@ -14,6 +14,14 @@ pub struct Point2D{
 impl Point2D{
     pub fn new(x: f64, y: f64) -> Self {
         Point2D{x, y}
+    }
+
+    pub fn set_x(&mut self, value: f64){
+        self.x = value;
+    } 
+
+    pub fn set_y(&mut self, value: f64){
+        self.y = value;
     }
 }
 
@@ -104,6 +112,343 @@ impl Svg{
     pub fn new(location: Point2D, svg_text: &str) -> Self {
         Svg{location, content: svg_text.to_string()}
     }
+
+    // 🎯 SVG에서 Gradient를 추출하는 함수
+    fn extract_gradients(svg_element: &Element) -> std::collections::HashMap<String, CanvasGradient> {
+        let mut gradients = std::collections::HashMap::new();
+        let context = window().unwrap().document().unwrap().get_element_by_id("drawing-canvas")
+            .unwrap()
+            .dyn_into::<HtmlCanvasElement>().unwrap()
+            .get_context("2d").unwrap()
+            .unwrap()
+            .dyn_into::<CanvasRenderingContext2d>().unwrap();
+
+        let linear_gradients = svg_element.query_selector_all("linearGradient").unwrap();
+        for i in 0..linear_gradients.length() {
+            if let Some(gradient_element) = linear_gradients.item(i) {
+                if let Ok(gradient_element) = gradient_element.dyn_into::<Element>() {
+                    if let Some(id) = gradient_element.get_attribute("id") {
+                        let x1 = gradient_element.get_attribute("x1").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+                        let y1 = gradient_element.get_attribute("y1").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+                        let x2 = gradient_element.get_attribute("x2").unwrap_or("100".to_string()).parse::<f64>().unwrap_or(100.0);
+                        let y2 = gradient_element.get_attribute("y2").unwrap_or("100".to_string()).parse::<f64>().unwrap_or(100.0);
+
+                        let gradient = context.create_linear_gradient(x1, y1, x2, y2);
+                        let stops = gradient_element.query_selector_all("stop").unwrap();
+
+                        for j in 0..stops.length() {
+                            if let Some(stop_element) = stops.item(j) {
+                                if let Ok(stop_element) = stop_element.dyn_into::<Element>() {
+                                    if let Some(offset) = stop_element.get_attribute("offset") {
+                                        let offset = offset.trim_end_matches('%').parse::<f32>().unwrap_or(0.0) / 100.0;
+                                        if let Some(color) = stop_element.get_attribute("stop-color") {
+                                            gradient.add_color_stop(offset, &color).unwrap();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        gradients.insert(id, gradient);
+                    }
+                }
+            }
+        }
+        gradients
+    }
+
+    // 🎯 SVG를 Canvas에 순서대로 그리는 함수 (g 요소 포함)
+    pub fn render_svg_to_canvas(&self, context: &CanvasRenderingContext2d, parent_element: &Element, gradients: &std::collections::HashMap<String, CanvasGradient>){
+        let child_nodes = parent_element.child_nodes();
+        for i in 0..child_nodes.length() {
+            if let Some(node) = child_nodes.item(i) {
+                if let Some(element) = node.dyn_ref::<Element>() {
+                    let tag_name = element.tag_name().to_lowercase();
+                    let transform = element.get_attribute("transform").unwrap_or_default();
+
+                    context.save();
+                    self.apply_transform(context, &transform);
+
+                    match tag_name.as_str() {
+                        "g" => self.render_svg_to_canvas(context, element, gradients),
+                        "rect" => self.render_rect(context, element),
+                        "polygon" => self.render_polygon(context, element),
+                        "polyline" => self.render_polyline(context, element),
+                        "ellipse" => self.render_ellipse(context, element),
+                        "path" => self.render_path(context, element, gradients),
+                        "text" => self.render_text(context, element),
+                        _ => (),
+                    }
+
+                    context.restore();
+                }
+            }
+        }
+    }
+
+    // 🎯 `g` 요소의 `transform` 속성을 적용하는 함수
+    fn apply_transform(&self, context: &CanvasRenderingContext2d, transform: &str) {
+        if transform.starts_with("translate(") {
+            let values: Vec<f64> = transform
+                .trim_start_matches("translate(")
+                .trim_end_matches(")")
+                .split(',')
+                .filter_map(|s| s.trim().parse().ok())
+                .collect();
+
+            if values.len() == 2 {
+                context.translate(values[0], values[1]).unwrap();
+            }
+        }
+    }
+
+    // 🎯 Polygon 요소 처리
+    fn render_polygon(&self, context: &CanvasRenderingContext2d, polygon_element: &Element){
+        if let Some(points) = polygon_element.get_attribute("points") {
+            let points_vec: Vec<&str> = points.split_whitespace().collect();
+            if points_vec.len() >= 2 {
+                context.save();
+                context.translate(self.location.x, self.location.y).unwrap();
+                context.begin_path();
+
+                // 🎯 첫 번째 점으로 이동
+                if let Some(first_point) = points_vec.get(0) {
+                    let coords: Vec<f64> = first_point.split(',')
+                        .filter_map(|s| s.parse::<f64>().ok())
+                        .collect();
+                    if coords.len() == 2 {
+                        context.move_to(coords[0], coords[1]);
+                    }
+                }
+
+                // 🎯 나머지 점들을 선으로 연결
+                for point in points_vec.iter().skip(1) {
+                    let coords: Vec<f64> = point.split(',')
+                        .filter_map(|s| s.parse::<f64>().ok())
+                        .collect();
+                    if coords.len() == 2 {
+                        context.line_to(coords[0], coords[1]);
+                    }
+                }
+
+                context.close_path();
+
+                // 🎨 색상 처리
+                let fill_color = polygon_element.get_attribute("fill").unwrap_or("none".to_string());
+                let stroke_color = polygon_element.get_attribute("stroke").unwrap_or("none".to_string());
+
+                if fill_color.to_lowercase() != "none" {
+                    context.set_fill_style(&JsValue::from_str(&fill_color));
+                    context.fill();
+                }
+
+                if !stroke_color.is_empty() && stroke_color.to_lowercase() != "none" {
+                    context.set_stroke_style(&JsValue::from_str(&stroke_color));
+                    context.stroke();
+                }
+
+                context.restore();
+            }
+        }
+    }
+    
+    // 🎯 `polyline` 요소를 Canvas에 그리는 함수
+    fn render_polyline(&self, context: &CanvasRenderingContext2d, polyline_element: &Element) {
+        if let Some(points) = polyline_element.get_attribute("points") {
+            let points_vec: Vec<&str> = points.split_whitespace().collect();
+            if points_vec.len() >= 2 {
+                context.save();
+                context.translate(self.location.x, self.location.y).unwrap();
+                context.begin_path();
+
+                if let Some(first_point) = points_vec.get(0) {
+                    let coords: Vec<f64> = first_point.split(',')
+                        .filter_map(|s| s.parse::<f64>().ok())
+                        .collect();
+                    if coords.len() == 2 {
+                        context.move_to(coords[0], coords[1]);
+                    }
+                }
+
+                for point in points_vec.iter().skip(1) {
+                    let coords: Vec<f64> = point.split(',')
+                        .filter_map(|s| s.parse::<f64>().ok())
+                        .collect();
+                    if coords.len() == 2 {
+                        context.line_to(coords[0], coords[1]);
+                    }
+                }
+
+                let fill_color = polyline_element.get_attribute("fill").unwrap_or("none".to_string());
+                let stroke_color = polyline_element.get_attribute("stroke").unwrap_or("none".to_string());
+
+                if fill_color.to_lowercase() != "none" {
+                    context.set_fill_style(&JsValue::from_str(&fill_color));
+                    context.fill();
+                }
+                if !stroke_color.is_empty() && stroke_color.to_lowercase() != "none" {
+                    context.set_stroke_style(&JsValue::from_str(&stroke_color));
+                    context.stroke();
+                }
+
+                context.restore();
+            }
+        }
+    }
+
+    // 🎯 Ellipse 요소 처리
+    fn render_ellipse(&self, context: &CanvasRenderingContext2d, ellipse_element: &Element){
+        let cx = ellipse_element.get_attribute("cx").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+        let cy = ellipse_element.get_attribute("cy").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+        let rx = ellipse_element.get_attribute("rx").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+        let ry = ellipse_element.get_attribute("ry").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+        let fill_color = ellipse_element.get_attribute("fill").unwrap_or("none".to_string());
+        info!("fill_color: {}", fill_color);
+        let stroke_color = ellipse_element.get_attribute("stroke").unwrap_or("none".to_string());
+
+        context.save();
+        context.translate(self.location.x, self.location.y).unwrap();
+        context.begin_path();
+        context.ellipse(cx, cy, rx, ry, 0.0, 0.0, std::f64::consts::PI * 2.0).unwrap();
+
+        if fill_color.to_lowercase() != "none" {
+            context.set_fill_style(&JsValue::from_str(&fill_color));
+            context.fill();
+        }
+
+        if !stroke_color.is_empty() && stroke_color.to_lowercase() != "none" {
+            context.set_stroke_style(&JsValue::from_str(&stroke_color));
+            context.stroke();
+        }
+
+        context.restore();
+    }
+
+    fn render_rect(&self, context: &CanvasRenderingContext2d, rect_element: &Element){
+        let x_pos = rect_element.get_attribute("x").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+        let y_pos = rect_element.get_attribute("y").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+        let width = rect_element.get_attribute("width").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+        let height = rect_element.get_attribute("height").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+        let rx = rect_element.get_attribute("rx").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+        let ry = rect_element.get_attribute("ry").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+
+        let fill_color = rect_element.get_attribute("fill").unwrap_or("none".to_string());
+        let stroke_color = rect_element.get_attribute("stroke").unwrap_or("none".to_string());
+
+        context.save();
+        context.translate(self.location.x, self.location.y).unwrap();
+        context.begin_path();
+
+        if rx > 0.0 || ry > 0.0 {
+            // 🎯 모서리가 둥근 사각형 (Rounded Rectangle)
+            context.move_to(x_pos + rx, y_pos);
+            context.line_to(x_pos + width - rx, y_pos);
+            context.quadratic_curve_to(x_pos + width, y_pos, x_pos + width, y_pos + ry);
+            context.line_to(x_pos + width, y_pos + height - ry);
+            context.quadratic_curve_to(x_pos + width, y_pos + height, x_pos + width - rx, y_pos + height);
+            context.line_to(x_pos + rx, y_pos + height);
+            context.quadratic_curve_to(x_pos, y_pos + height, x_pos, y_pos + height - ry);
+            context.line_to(x_pos, y_pos + ry);
+            context.quadratic_curve_to(x_pos, y_pos, x_pos + rx, y_pos);
+            context.close_path();
+        } else {
+            // 🎯 일반 사각형
+            context.rect(x_pos, y_pos, width, height);
+        }
+
+        // 🎨 색상 처리
+        if fill_color.to_lowercase() != "none" {
+            context.set_fill_style(&JsValue::from_str(&fill_color));
+            context.fill();
+        }
+
+        if !stroke_color.is_empty() && stroke_color.to_lowercase() != "none" {
+            context.set_stroke_style(&JsValue::from_str(&stroke_color));
+            context.stroke();
+        }
+
+        context.restore();
+    }
+
+    fn render_path(&self, context: &CanvasRenderingContext2d, path_element: &Element, gradients: &std::collections::HashMap<String, CanvasGradient>){
+        if let Some(d_attr) = path_element.get_attribute("d") {
+            if let Ok(path) = Path2d::new_with_path_string(&d_attr) {
+                // 🎨 SVG 색상 적용 (fill, stroke)
+                let mut fill_style= JsValue::from_str("none");
+                let stroke_color = path_element.get_attribute("stroke").unwrap_or("none".to_string());
+
+                if let Some(fill) = path_element.get_attribute("fill") {
+                    if fill.starts_with("url(") {
+                        if let Some(gradient_id) = fill.strip_prefix("url(#").and_then(|s| s.strip_suffix(")")) {
+                            if let Some(gradient) = gradients.get(gradient_id) {
+                                fill_style = JsValue::from(gradient);
+                            }
+                        }
+                    } else if fill.to_lowercase() != "none" {
+                        fill_style = JsValue::from_str(&fill);
+                    }
+                }
+
+                // 🎯 드롭된 위치에 그리기
+                context.save();
+                context.translate(self.location.x, self.location.y).unwrap();
+
+                if fill_style.as_string().unwrap_or_default() != "none" {
+                    context.set_fill_style(&fill_style);
+                    context.fill_with_path_2d(&path);
+                }
+
+                if !stroke_color.is_empty() && stroke_color.to_lowercase() != "none" {
+                    context.set_stroke_style(&JsValue::from_str(&stroke_color));
+                    context.stroke_with_path(&path);
+                }
+
+                context.restore();
+            } else {
+                web_sys::console::log_1(&JsValue::from_str(&format!("⚠️ Path2d 변환 실패: {}", d_attr)));
+            } 
+        }
+    }
+
+    // 🎯 `text` 요소를 Canvas에 그리는 함수
+    fn render_text(&self, context: &CanvasRenderingContext2d, text_element: &Element) {
+        let text_content = text_element.text_content().unwrap_or_default();
+        let x_pos = text_element.get_attribute("x").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+        let y_pos = text_element.get_attribute("y").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+        let font_size = text_element.get_attribute("font-size").unwrap_or("16".to_string());
+        let font_family = text_element.get_attribute("font-family").unwrap_or("Arial".to_string());
+        let text_anchor = text_element.get_attribute("text-anchor").unwrap_or("start".to_string());
+        let fill_color = text_element.get_attribute("fill").unwrap_or("none".to_string());
+        let stroke_color = text_element.get_attribute("stroke").unwrap_or("none".to_string());
+
+        // 🎯 Font 설정
+        let font_style = format!("{}px {}", font_size, font_family);
+        context.set_font(&font_style);
+
+        // 🎯 Text 정렬 처리
+        let text_align = match text_anchor.as_str() {
+            "middle" => "center",
+            "end" => "right",
+            _ => "left",
+        };
+        context.set_text_align(text_align);
+
+        context.save();
+        context.translate(self.location.x, self.location.y).unwrap();
+
+        // 🎨 Stroke 적용
+        if stroke_color.to_lowercase() != "none" {
+            context.set_stroke_style(&JsValue::from_str(&stroke_color));
+            context.stroke_text(&text_content, x_pos, y_pos).unwrap();
+        }
+
+        // 🎨 Fill 적용
+        if fill_color.to_lowercase() != "none" {
+            context.set_fill_style(&JsValue::from_str(&fill_color));
+            context.fill_text(&text_content, x_pos, y_pos).unwrap();
+        }
+
+        context.restore();
+    }
 }
 
 impl Shape for Svg{
@@ -116,46 +461,14 @@ impl Shape for Svg{
     }
 
     fn draw(&self, context: &CanvasRenderingContext2d){
-        let path = Path2d::new().unwrap();
-
         let parser = DomParser::new().unwrap();
         let doc = parser.parse_from_string(&self.content, web_sys::SupportedType::ImageSvgXml).unwrap();
 
         if let Some(svg_element) = doc.query_selector("svg").ok().flatten() {
-            web_sys::console::log_1(&"SVG 파싱 성공".into());
+            let gradients = Svg::extract_gradients(&svg_element);
+            self.render_svg_to_canvas(context, &svg_element, &gradients);
         } else {
             web_sys::console::log_1(&"⚠️ SVG 파싱 실패".into());
-            return;
         }
-
-        let paths = match doc.query_selector_all("path") { // SVG 요소에서 path 요소 가져오기
-            Ok(paths) => paths,
-            Err(_) => {
-                info!("Failed to querySelector");
-                return;
-            }
-        };
-
-        if paths.length() == 0 {
-            web_sys::console::log_1(&"⚠️ SVG 내부에 path 요소가 없음".into());
-            return;
-        }
-
-        for i in 0..paths.length() {
-            if let Some(path_element) = paths.item(i) {
-                if let Ok(path_element) = path_element.dyn_into::<Element>() {
-                    if let Some(d_attr) = path_element.get_attribute("d") {
-                        path.add_path(&Path2d::new_with_path_string(&d_attr).unwrap());
-                    }
-                }
-            }
-        }
-
-        context.save();
-        context.set_fill_style(&JsValue::from_str("black"));
-        context.translate(self.location.x, self.location.y).unwrap();
-        context.fill_with_path_2d(&path);
-        context.stroke_with_path(&path);
-        context.restore();
     }
 }
