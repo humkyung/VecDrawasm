@@ -14,4 +14,4 @@ crate-type = ["cdylib"]
 [dependencies.web-sys]
 version = "0.3.77"
 features = ["Window", "Document", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "HtmlImageElement", "MouseEvent", "WheelEvent", "KeyboardEvent", "CanvasGradient"
-, "CanvasRenderingContext2d", "DomRect", "DragEvent", "DataTransfer", "FileReader", "HtmlDivElement", "Path2d", "Element", "DomParser", "SupportedType", "Node", "NodeList"]
+, "CanvasRenderingContext2d", "DomRect", "DragEvent", "DataTransfer", "FileReader", "HtmlDivElement", "Path2d", "Element", "DomParser", "SupportedType", "Node", "NodeList" ]

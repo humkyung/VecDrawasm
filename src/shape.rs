@@ -4,7 +4,7 @@ use log::info;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use web_sys::{window, CanvasRenderingContext2d, Document, Element, DomParser, CanvasGradient, HtmlCanvasElement, MouseEvent, WheelEvent, Path2d};
+use web_sys::{window, CanvasRenderingContext2d, Element, DomParser, CanvasGradient, HtmlCanvasElement, Path2d};
 
 #[derive(Clone, Copy)]
 pub struct Point2D{
@@ -135,13 +135,24 @@ impl Svg{
 
                         let gradient = context.create_linear_gradient(x1, y1, x2, y2);
                         let stops = gradient_element.query_selector_all("stop").unwrap();
+                        info!("stops.length(): {}", stops.length());
 
                         for j in 0..stops.length() {
                             if let Some(stop_element) = stops.item(j) {
                                 if let Ok(stop_element) = stop_element.dyn_into::<Element>() {
                                     if let Some(offset) = stop_element.get_attribute("offset") {
                                         let offset = offset.trim_end_matches('%').parse::<f32>().unwrap_or(0.0) / 100.0;
+                                        info!("offset: {}", offset);
+
                                         if let Some(color) = stop_element.get_attribute("stop-color") {
+                                            info!("color: {}", color);
+                                            gradient.add_color_stop(offset, &color).unwrap();
+                                        }
+                                    }
+                                    else{
+                                        let offset = 0.0;
+                                        if let Some(color) = stop_element.get_attribute("stop-color") {
+                                            info!("color: {}", color);
                                             gradient.add_color_stop(offset, &color).unwrap();
                                         }
                                     }
@@ -174,6 +185,7 @@ impl Svg{
                         "polygon" => self.render_polygon(context, element),
                         "polyline" => self.render_polyline(context, element),
                         "ellipse" => self.render_ellipse(context, element),
+                        "circle" => self.render_circle(context, element),
                         "path" => self.render_path(context, element, gradients),
                         "text" => self.render_text(context, element),
                         _ => (),
@@ -323,6 +335,34 @@ impl Svg{
         context.restore();
     }
 
+    // 🎯 `circle` 요소를 Canvas에 그리는 함수
+    fn render_circle(&self, context: &CanvasRenderingContext2d, circle_element: &Element) {
+        let cx = circle_element.get_attribute("cx").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+        let cy = circle_element.get_attribute("cy").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+        let r = circle_element.get_attribute("r").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+        let fill_color = circle_element.get_attribute("fill").unwrap_or("none".to_string());
+        let stroke_color = circle_element.get_attribute("stroke").unwrap_or("none".to_string());
+
+        context.save();
+        context.translate(self.location.x, self.location.y).unwrap();
+        context.begin_path();
+        context.arc(cx, cy, r, 0.0, std::f64::consts::PI * 2.0).unwrap();
+
+        // 🎯 Fill 적용
+        if fill_color.to_lowercase() != "none" {
+            context.set_fill_style(&JsValue::from_str(&fill_color));
+            context.fill();
+        }
+
+        // 🎯 Stroke 적용
+        if !stroke_color.is_empty() && stroke_color.to_lowercase() != "none" {
+            context.set_stroke_style(&JsValue::from_str(&stroke_color));
+            context.stroke();
+        }
+
+        context.restore();
+    }
+
     fn render_rect(&self, context: &CanvasRenderingContext2d, rect_element: &Element){
         let x_pos = rect_element.get_attribute("x").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
         let y_pos = rect_element.get_attribute("y").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
@@ -338,7 +378,12 @@ impl Svg{
         context.translate(self.location.x, self.location.y).unwrap();
         context.begin_path();
 
-        if rx > 0.0 || ry > 0.0 {
+        if rx > 0.0 && rx == width * 0.5 && rx == height * 0.5 {
+            // 🎯 원 (Circle)
+            let cx = x_pos + width / 2.0;
+            let cy = y_pos + height / 2.0;
+            context.arc(cx,cy, rx, 0.0, std::f64::consts::PI * 2.0).unwrap();
+        } else if rx > 0.0 || ry > 0.0 {
             // 🎯 모서리가 둥근 사각형 (Rounded Rectangle)
             context.move_to(x_pos + rx, y_pos);
             context.line_to(x_pos + width - rx, y_pos);
@@ -381,6 +426,7 @@ impl Svg{
                         if let Some(gradient_id) = fill.strip_prefix("url(#").and_then(|s| s.strip_suffix(")")) {
                             if let Some(gradient) = gradients.get(gradient_id) {
                                 fill_style = JsValue::from(gradient);
+                                info!("gradient_id: {:?}", gradient_id);
                             }
                         }
                     } else if fill.to_lowercase() != "none" {
@@ -388,12 +434,19 @@ impl Svg{
                     }
                 }
 
+                let fill_rule = path_element.get_attribute("fill-rule").unwrap_or("nonzero".to_string());
+
                 // 🎯 드롭된 위치에 그리기
                 context.save();
                 context.translate(self.location.x, self.location.y).unwrap();
 
                 if fill_style.as_string().unwrap_or_default() != "none" {
                     context.set_fill_style(&fill_style);
+
+                    if fill_rule == "evenodd" {
+                        context.clip_with_path_2d(&path);
+                    }
+
                     context.fill_with_path_2d(&path);
                 }
 
