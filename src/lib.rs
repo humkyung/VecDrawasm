@@ -187,7 +187,7 @@ pub fn start() -> Result<(), JsValue> {
     // 🎯 Canvas에 SVG를 벡터로 렌더링
     #[wasm_bindgen]
     pub fn render_svg_to_canvas(context: &CanvasRenderingContext2d, _canvas: &Element, svg_data: &str, x: f64, y: f64) {
-        let svg = Svg::new(Point2D::new(x, y), svg_data); 
+        let mut svg = Svg::new(Point2D::new(x, y), svg_data); 
         svg.draw(context);
         SHAPES.with(|shapes| {
             shapes.borrow_mut().push(Box::new(svg));
@@ -527,7 +527,7 @@ fn redraw(context: &CanvasRenderingContext2d, offscreen_canvas: &HtmlCanvasEleme
     context.fill_rect(0.0, 0.0, canvas_width, canvas_height);
 
     SHAPES.with(|shapes| {
-        for shape in shapes.borrow().iter() {
+        for shape in shapes.borrow_mut().iter_mut() {
             shape.draw(context);
         }
     });
