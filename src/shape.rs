@@ -5,6 +5,7 @@ use log::info;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+use web_sys::console::group;
 use web_sys::{window, CanvasRenderingContext2d, Element, DomParser, CanvasGradient, HtmlCanvasElement, Path2d};
 
 #[derive(Clone, Copy)]
@@ -200,52 +201,48 @@ impl Svg{
         }
     }
 
+    fn parse_fill_attribute(&self, svg_element: &Element, gradients: &HashMap<String, CanvasGradient>) -> JsValue {
+        let fill = svg_element.get_attribute("fill").unwrap_or("none".to_string());
+        if fill.starts_with("url(") {
+            let gradient_id = fill.strip_prefix("url(#").and_then(|s| s.strip_suffix(")")).unwrap_or("");
+            if let Some(gradient) = gradients.get(gradient_id) {
+                return JsValue::from(gradient);
+            }
+        } else if fill.to_lowercase() != "none" {
+            return JsValue::from_str(&fill);
+        }
+
+        JsValue::from_str("none")
+    }
+
     // 🎯 SVG를 Canvas에 순서대로 그리는 함수 (g 요소 포함)
     pub fn render_svg_to_canvas(&self, context: &CanvasRenderingContext2d, parent_element: &Element , gradients: &HashMap<String, CanvasGradient>){
+        context.save();
+        context.translate(self.location.x, self.location.y).unwrap();
+
         let child_nodes = parent_element.child_nodes();
         for i in 0..child_nodes.length() {
             if let Some(node) = child_nodes.item(i) {
                 if let Some(element) = node.dyn_ref::<Element>() {
                     let tag_name = element.tag_name().to_lowercase();
-                    let transform = element.get_attribute("transform").unwrap_or_default();
-
-                    let mut fill_style = JsValue::from_str("none");
-                    if let Some(fill) = element.get_attribute("fill") {
-                        if fill.starts_with("url(") {
-                            if let Some(gradient_id) = fill.strip_prefix("url(#").and_then(|s| s.strip_suffix(")")) {
-                                if let Some(gradient) = gradients.get(gradient_id) {
-                                    fill_style = JsValue::from(gradient);
-                                }
-                            }
-                        } else if fill.to_lowercase() != "none" {
-                            fill_style = JsValue::from_str(&fill);
-                            info!("fill style: {:?}", fill);
-                        }
-                    }
-
-                    context.save();
-                    self.apply_transform(context, &transform);
-                    if fill_style.as_string().unwrap_or_default() != "none" {
-                        context.set_fill_style(&fill_style);
-                        context.fill();
-                    }
+                    let fill_style = self.parse_fill_attribute(element, gradients);
 
                     match tag_name.as_str() {
-                        "g" => self.render_svg_to_canvas(context, element, gradients),
+                        "g" => self.render_group(context, element, gradients, &fill_style),
                         "rect" => self.render_rect(context, element),
                         "polygon" => self.render_polygon(context, element),
                         "polyline" => self.render_polyline(context, element),
                         "ellipse" => self.render_ellipse(context, element),
                         "circle" => self.render_circle(context, element, gradients),
-                        "path" => self.render_path(context, element, gradients),
+                        "path" => self.render_path(context, element, gradients, &fill_style),
                         "text" => self.render_text(context, element),
                         _ => (),
                     }
-
-                    context.restore();
                 }
             }
         }
+
+        context.restore();
     }
 
     // 🎯 `g` 요소의 `transform` 속성을 적용하는 함수
@@ -265,7 +262,47 @@ impl Svg{
     }
 
     // 🎯 Group 요소 처리
-    fn render_group(&self, context: &CanvasRenderingContext2d, group_element: &Element){
+    fn render_group(&self, context: &CanvasRenderingContext2d, group_element: &Element, gradients: &HashMap<String, CanvasGradient>, fill_style: &JsValue){
+        let transform = group_element.get_attribute("transform").unwrap_or_default();
+        self.apply_transform(context, &transform);
+
+        context.save();
+        self.apply_transform(context, &transform);
+
+        // 🎨 그룹의 `fill` 속성 가져오기
+        let mut group_fill = self.parse_fill_attribute(group_element, gradients);
+        if group_fill.as_string().unwrap_or_default() == "none" {
+            group_fill = fill_style.clone();
+        }
+
+        let child_nodes = group_element.child_nodes();
+        for i in 0..child_nodes.length() {
+            if let Some(node) = child_nodes.item(i) {
+                if let Some(element) = node.dyn_ref::<Element>() {
+                    let tag_name = element.tag_name().to_lowercase();
+                    let transform = element.get_attribute("transform").unwrap_or_default();
+
+                    context.save();
+                    self.apply_transform(context, &transform);
+                    
+                    match tag_name.as_str() {
+                        "g" => self.render_group(context, element, gradients, &group_fill),
+                        "rect" => self.render_rect(context, element),
+                        "polygon" => self.render_polygon(context, element),
+                        "polyline" => self.render_polyline(context, element),
+                        "ellipse" => self.render_ellipse(context, element),
+                        "circle" => self.render_circle(context, element, gradients),
+                        "path" => self.render_path(context, element, gradients, &group_fill),
+                        "text" => self.render_text(context, element),
+                        _ => (),
+                    }
+
+                    context.restore();
+                }
+            }
+        }
+
+        context.restore();
     }
 
     // 🎯 Polygon 요소 처리
@@ -274,7 +311,6 @@ impl Svg{
             let points_vec: Vec<&str> = points.split_whitespace().collect();
             if points_vec.len() >= 2 {
                 context.save();
-                context.translate(self.location.x, self.location.y).unwrap();
                 context.begin_path();
 
                 // 🎯 첫 번째 점으로 이동
@@ -324,7 +360,6 @@ impl Svg{
             let points_vec: Vec<&str> = points.split_whitespace().collect();
             if points_vec.len() >= 2 {
                 context.save();
-                context.translate(self.location.x, self.location.y).unwrap();
                 context.begin_path();
 
                 if let Some(first_point) = points_vec.get(0) {
@@ -373,7 +408,6 @@ impl Svg{
         let stroke_color = ellipse_element.get_attribute("stroke").unwrap_or("none".to_string());
 
         context.save();
-        context.translate(self.location.x, self.location.y).unwrap();
         context.begin_path();
         context.ellipse(cx, cy, rx, ry, 0.0, 0.0, std::f64::consts::PI * 2.0).unwrap();
 
@@ -431,7 +465,6 @@ impl Svg{
         }
 
         context.save();
-        context.translate(self.location.x, self.location.y).unwrap();
         context.begin_path();
         context.arc(cx, cy, r, 0.0, std::f64::consts::PI * 2.0).unwrap();
 
@@ -462,7 +495,6 @@ impl Svg{
         let stroke_color = rect_element.get_attribute("stroke").unwrap_or("none".to_string());
 
         context.save();
-        context.translate(self.location.x, self.location.y).unwrap();
         context.begin_path();
 
         if rx > 0.0 && rx == width * 0.5 && rx == height * 0.5 {
@@ -501,27 +533,16 @@ impl Svg{
         context.restore();
     }
 
-    fn render_path(&self, context: &CanvasRenderingContext2d, path_element: &Element, gradients: &HashMap<String, CanvasGradient>){
+    fn render_path(&self, context: &CanvasRenderingContext2d, path_element: &Element, gradients: &HashMap<String, CanvasGradient>, group_fill: &JsValue) {
         if let Some(d_attr) = path_element.get_attribute("d") {
             if let Ok(path) = Path2d::new_with_path_string(&d_attr) {
                 // 🎨 SVG 색상 적용 (fill, stroke)
-                let mut fill_style= JsValue::from_str("none");
+                let mut fill_style= group_fill.clone();
                 let mut stroke_style= JsValue::from_str(path_element.get_attribute("stroke").unwrap_or("none".to_string()).as_str());
 
-                if let Some(fill) = path_element.get_attribute("fill") {
-                    if fill.starts_with("url(") {
-                        if let Some(gradient_id) = fill.strip_prefix("url(#").and_then(|s| s.strip_suffix(")")) {
-                            if let Some(gradient) = gradients.get(gradient_id) {
-                                fill_style = JsValue::from(gradient);
-                                info!("gradient_id: {:?}", gradient_id);
-                            }
-                        }
-                    } else if fill.to_lowercase() != "none" {
-                        fill_style = JsValue::from_str(&fill);
-                    }
-                }
-
+                fill_style = self.parse_fill_attribute(path_element, gradients);
                 let fill_rule = path_element.get_attribute("fill-rule").unwrap_or("nonzero".to_string());
+                let clip_rule = path_element.get_attribute("clip-rule").unwrap_or("nonzero".to_string());
 
                 // 🎯 `class` 속성이 있으면 스타일 적용
                 if let Some(class_name) = path_element.get_attribute("class") {
@@ -529,6 +550,7 @@ impl Svg{
                         if let Some(class_styles) = self.styles.as_ref().unwrap().get(class) {
                             if let Some(fill) = class_styles.get("fill") {
                                 fill_style = JsValue::from_str(fill);
+                                info!("fill_style: {:?}", fill);
                             }
                             if let Some(stroke) = class_styles.get("stroke") {
                                 stroke_style = JsValue::from_str(stroke);
@@ -542,16 +564,15 @@ impl Svg{
 
                 // 🎯 드롭된 위치에 그리기
                 context.save();
-                context.translate(self.location.x, self.location.y).unwrap();
 
                 if fill_style.as_string().unwrap_or_default() != "none" {
                     context.set_fill_style(&fill_style);
+                    context.fill_with_path_2d(&path);
 
-                    if fill_rule == "evenodd" {
+                    if clip_rule == "evenodd" {
+                        info!("clip_rule: {:?}", clip_rule);
                         context.clip_with_path_2d(&path);
                     }
-
-                    context.fill_with_path_2d(&path);
                 }
 
                 if stroke_style.as_string().unwrap_or_default().to_lowercase() != "none" {
@@ -590,7 +611,6 @@ impl Svg{
         context.set_text_align(text_align);
 
         context.save();
-        context.translate(self.location.x, self.location.y).unwrap();
 
         // 🎨 Stroke 적용
         if stroke_color.to_lowercase() != "none" {
