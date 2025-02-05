@@ -269,7 +269,7 @@ impl Svg{
                     match tag_name.as_str() {
                         "g" => self.render_group(&context, element, gradients, &fill_style),
                         "rect" => self.render_rect(&context, element, gradients, &fill_style),
-                        "polygon" => self.render_polygon(&context, element),
+                        "polygon" => self.render_polygon(&context, element, gradients),
                         "polyline" => self.render_polyline(&context, element),
                         "ellipse" => self.render_ellipse(&context, element, gradients),
                         "circle" => self.render_circle(&context, element, gradients),
@@ -361,7 +361,7 @@ impl Svg{
                     match tag_name.as_str() {
                         "g" => self.render_group(&context, element, gradients, &group_fill),
                         "rect" => self.render_rect(&context, element, gradients, &group_fill),
-                        "polygon" => self.render_polygon(&context, element),
+                        "polygon" => self.render_polygon(&context, element, gradients),
                         "polyline" => self.render_polyline(&context, element),
                         "ellipse" => self.render_ellipse(&context, element, gradients),
                         "circle" => self.render_circle(&context, element, gradients),
@@ -377,7 +377,7 @@ impl Svg{
     }
 
     // 🎯 Polygon 요소 처리
-    fn render_polygon(&self, context: &CanvasRenderingContext2d, polygon_element: &Element){
+    fn render_polygon(&self, context: &CanvasRenderingContext2d, polygon_element: &Element, gradients: &HashMap<String, CanvasGradient>){
         if let Some(points) = polygon_element.get_attribute("points") {
             let points_vec: Vec<&str> = points.split_whitespace().collect();
             if points_vec.len() >= 2 {
@@ -407,13 +407,11 @@ impl Svg{
                 context.close_path();
 
                 // 🎨 색상 처리
-                let fill_color = polygon_element.get_attribute("fill").unwrap_or("none".to_string());
+                self.apply_class_attribute(context, polygon_element);
+                self.apply_fill_attribute(context, polygon_element, gradients);
                 let stroke_color = polygon_element.get_attribute("stroke").unwrap_or("none".to_string());
 
-                if fill_color.to_lowercase() != "none" {
-                    context.set_fill_style(&JsValue::from_str(&fill_color));
-                    context.fill();
-                }
+                context.fill();
 
                 if !stroke_color.is_empty() && stroke_color.to_lowercase() != "none" {
                     context.set_stroke_style(&JsValue::from_str(&stroke_color));
