@@ -1,7 +1,9 @@
+use js_sys::Promise;
 use log::info;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{Document, CanvasRenderingContext2d, HtmlCanvasElement, HtmlInputElement, HtmlImageElement, MouseEvent, WheelEvent, DragEvent, FileReader, Element, Path2d
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{Document, CanvasRenderingContext2d, HtmlCanvasElement, HtmlInputElement, HtmlImageElement, MouseEvent, WheelEvent, DragEvent, File, FileList, FileReader, Element, Path2d
     , HtmlDivElement , DomParser, HtmlElement, Node, NodeList};
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -11,6 +13,8 @@ use crate::shape::{Shape, Point2D, Pencil, Line, Svg};
 
 pub mod state;
 use crate::state::State;
+
+pub mod hytos;
 
 // SHAPES 벡터 정의
 thread_local! {
@@ -140,43 +144,24 @@ pub fn start() -> Result<(), JsValue> {
                     let mouse_y = event.client_y() as f64 - rect.top();
                     let (drop_x, drop_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (0.0, 0.0), &*state_clone.borrow());
                     render_svg_to_canvas(&context_clone, &canvas_clone, &svg_data, drop_x, drop_y);
-                }/* else if let files = data_transfer.get_files().unwrap() {
-                    if let Some(file) = files.item(0) {
-                        let file_type = file.type_();
-
-                        // ✅ SVG 파일만 허용
-                        if file_type == "image/svg+xml" {
-                            let reader = FileReader::new();
-                            let reader_clone = reader.clone().unwrap();
-
-                            let onload_closure = Closure::wrap(Box::new(move |_: web_sys::Event| {
-                                if let Ok(result) = reader_clone.result().as_ref().unwrap().as_string() {
-                                    if let Some(svg_data) = result.as_string() {
-                                        let img = HtmlImageElement::new().unwrap();
-                                        let img_clone = img.clone();
-                                        let context_clone = Rc::clone(&context_clone);
-                                        let canvas_clone = Rc::clone(&canvas_clone);
-
-                                        let onload_img = Closure::wrap(Box::new(move || {
-                                            // 캔버스 클리어 후 이미지 그리기
-                                            context_clone.clear_rect(0.0, 0.0, canvas_clone.width() as f64, canvas_clone.height() as f64);
-                                            context_clone.draw_image_with_html_image_element(&img_clone, 0.0, 0.0).unwrap();
-                                        }) as Box<dyn FnMut()>);
-
-                                        // SVG 데이터를 data URL로 설정
-                                        img.set_src(&format!("data:image/svg+xml,{}", svg_data));
-                                        img.set_onload(Some(onload_img.as_ref().unchecked_ref()));
-                                        onload_img.forget();
+                } else {
+                    let promise: Result<Promise, wasm_bindgen::JsValue> = data_transfer.get_files();
+                    if let Ok(promise) = promise {
+                        wasm_bindgen_futures::spawn_local(async move {
+                            match JsFuture::from(promise).await {
+                                Ok(file_list) => {
+                                    let files: web_sys::FileList = js_files.into();
+                                    if let Some(file) = files.get(0) {
+                                        hytos::read_sqlite_file(file).await;
                                     }
                                 }
-                            }) as Box<dyn FnMut(_)>);
-
-                            reader.expect("REASON").set_onload(Some(onload_closure.as_ref().unchecked_ref()));
-                            reader.read_as_text(&file).unwrap();
-                            onload_closure.forget();
-                        }
+                                Err(e) => {
+                                    info!("Error reading file: {:?}", e);
+                                }
+                            }
+                        });
                     }
-                }*/
+                }
             }
         }) as Box<dyn FnMut(_)>);
 
