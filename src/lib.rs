@@ -590,8 +590,8 @@ fn add_click_listener(element: &web_sys::Element, callback: impl Fn() + 'static)
 */
 fn calculate_canvas_coordinates(mouse_pos: (f64, f64), scroll: (f64, f64)) -> (f64, f64) {
     STATE.with(|state| {
-        let x = (mouse_pos.0 - state.borrow().offset().x - scroll.0) / state.borrow().scale();
-        let y = (mouse_pos.1 - state.borrow().offset().y - scroll.1) / state.borrow().scale();
+        let x = (mouse_pos.0 - state.borrow().offset().x) / state.borrow().scale() + scroll.0;
+        let y = (mouse_pos.1 - state.borrow().offset().y) / state.borrow().scale() + scroll.1;
         return (x, y);
     })
 }
