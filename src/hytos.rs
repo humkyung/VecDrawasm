@@ -1,60 +1,29 @@
 use std::{mem::offset_of, str};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{window, DragEvent, File, FileReader};
-use js_sys::{Uint8Array, ArrayBuffer};
-use diesel_wasm_sqlite::{Connection, QueryResult};
-use diesel::prelude::*;
+use web_sys::{DragEvent, File, FileReader};
+use js_sys::{Promise, Uint8Array, ArrayBuffer};
 use serde::Serialize;
 use log::info;
 
-mod schema {
-    table! {
-        users (id) {
-            id -> Integer,
-            name -> Text,
-        }
-    }
-}
-
-#[derive(Queryable, Serialize)]
-struct User {
-    id: i32,
-    name: String,
-}
-
 pub async fn read_sqlite_file(file: File) {
     let reader = FileReader::new().unwrap();
-    let reader_clone = reader.clone();
-    let file_clone = file.clone();
 
-    let promise = JsFuture::new(&reader_clone);
-    reader.read_as_array_buffer(&file_clone).unwrap();
+    let promise = JsFuture::from(Promise::new(&mut |resolve, _| {
+        let onload_closure = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+            resolve.call0(&JsValue::null()).unwrap();
+        }) as Box<dyn FnMut(_)>);
 
-    let result = promise.await.unwrap();
-    let array_buffer: ArrayBuffer = result.unchecked_into();
+        reader.set_onload(Some(onload_closure.as_ref().unchecked_ref()));
+        onload_closure.forget(); // Prevent Rust from dropping the closure
+    }));
+
+    reader.read_as_array_buffer(&file).unwrap();
+    promise.await.unwrap(); // Wait for the file to finish loading
+
+    let array_buffer: ArrayBuffer = reader.result().unwrap().unchecked_into();
     let uint8_array = Uint8Array::new(&array_buffer);
     let bytes = uint8_array.to_vec();
 
-    match Connection::open_in_memory() {
-        Ok(conn) => {
-            conn.load_from_bytes(&bytes).unwrap();
-
-            let users: QueryResult<Vec<User>> = conn
-                .execute(|conn| schema::users::table.load::<User>(conn));
-
-            match users {
-                Ok(users) => {
-                    let users_json = serde_wasm_bindgen::to_value(&users).unwrap();
-                    web_sys::console::log_1(&users_json);
-                }
-                Err(e) => {
-                    web_sys::console::error_1(&format!("Query Error: {:?}", e).into());
-                }
-            }
-        }
-        Err(e) => {
-            web_sys::console::error_1(&format!("SQLite Error: {:?}", e).into());
-        }
-    }
+    web_sys::console::log_1(&format!("Loaded SQLite DB from file: {}", file.name()).into());
 }

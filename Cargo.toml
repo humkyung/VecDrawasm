@@ -10,7 +10,6 @@ log = "0.4"
 console_log = "1.0.0"
 svgtypes = "0.15.3"
 js-sys = "0.3"
-diesel-wasm-sqlite = "0.0.1"  # 최신 버전 확인 필요
 serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
 console_error_panic_hook = "0.1"
@@ -22,4 +21,4 @@ crate-type = ["cdylib"]
 version = "0.3.77"
 features = ["Window", "Document", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "HtmlImageElement", "MouseEvent", "WheelEvent", "KeyboardEvent", "CanvasGradient"
 , "CanvasRenderingContext2d", "DomRect", "DragEvent", "DataTransfer", "FileReader", "HtmlDivElement", "Path2d", "Element", "DomParser", "SupportedType", "Node", "NodeList"
-, "CssStyleDeclaration", "HtmlCollection", "HtmlStyleElement", "Event", "File"]
+, "CssStyleDeclaration", "HtmlCollection", "HtmlStyleElement", "Event", "File", "FileList", "ImageData"]

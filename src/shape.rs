@@ -11,7 +11,7 @@ use web_sys::console::info;
 use web_sys::{window, CanvasRenderingContext2d, Element, DomParser, CanvasGradient, HtmlCanvasElement, Path2d, CssStyleDeclaration};
 use svgtypes::Transform;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Point2D{
     pub x: f64,
     pub y: f64,
@@ -34,7 +34,10 @@ impl Point2D{
 pub trait Shape{
     fn color(&self) -> &str;
     fn line_width(&self) -> f64 { 2.0 }
+    fn is_hit(&self, x: f64, y: f64) -> bool;
+    fn set_hovered(&mut self, hovered: bool);
     fn draw(&mut self, context: &CanvasRenderingContext2d);
+    fn draw_xor(&self, context: &CanvasRenderingContext2d);
 }
 
 pub struct Pencil{
@@ -60,23 +63,60 @@ impl Shape for Pencil{
         self.line_width
     }
 
+    fn is_hit(&self, x: f64, y: f64) -> bool {
+        for point in self.points.iter() {
+            let dx = x - point.x;
+            let dy = y - point.y;
+            if dx * dx + dy * dy < 25.0 {
+                return true;
+            }
+        }
+        false        
+    }
+
+    fn set_hovered(&mut self, hovered: bool) {
+        if hovered {
+            self.color = "#ff0000".to_string();
+        } else {
+            self.color = "#000000".to_string();
+        }
+    }
+
     fn draw(&mut self, context: &CanvasRenderingContext2d){
         context.set_stroke_style(&JsValue::from_str(&self.color));
         context.set_line_width(self.line_width);
         context.begin_path();
         
-        info!("draw pencil"); // 값을 콘솔에 출력
         if let Some(start) = self.points.first(){
             context.move_to(start.x, start.y);
             for point in self.points.iter().skip(1) {
                 context.line_to(point.x, point.y);
             }
+            context.stroke();
         }
-
-        context.stroke();
     }   
+
+    fn draw_xor(&self, context: &CanvasRenderingContext2d){
+        if let Some(start) = self.points.first(){
+            context.set_global_composite_operation("xor").unwrap();
+
+            context.begin_path();
+            context.move_to(start.x, start.y);
+            for point in self.points.iter().skip(1) {
+                context.line_to(point.x, point.y);
+            }
+
+            context.set_stroke_style(&JsValue::from_str(&self.color));
+            context.set_line_width(self.line_width);
+
+            context.stroke();
+
+            context.set_global_composite_operation("source-over").unwrap(); // 기본 모드로 복원
+        }
+    }
 }
 
+#[derive(Debug, Clone)]
 pub struct Line{
     color: String,
     line_width: f64,
@@ -98,14 +138,58 @@ impl Shape for Line{
         self.line_width
     }
 
+    fn is_hit(&self, x: f64, y: f64) -> bool {
+        let dx = self.end.x - self.start.x;
+        let dy = self.end.y - self.start.y;
+        let d = dx * dx + dy * dy;
+        let mut t = ((x - self.start.x) * dx + (y - self.start.y) * dy) / d;
+        if t < 0.0 {
+            t = 0.0;
+        } else if t > 1.0 {
+            t = 1.0;
+        }
+
+        let px = self.start.x + t * dx;
+        let py = self.start.y + t * dy;
+        let dx = px - x;
+        let dy = py - y;
+        dx * dx + dy * dy < 25.0
+    }
+
+    fn set_hovered(&mut self, hovered: bool) {
+        /*
+        if hovered {
+            self.color = "#ff0000".to_string();
+        } else {
+            self.color = "#000000".to_string();
+        }
+        */
+    }
+
     fn draw(&mut self, context: &CanvasRenderingContext2d){
-        context.set_stroke_style(&"#0000ff".into());
+        context.set_stroke_style(&JsValue::from_str(&self.color));
         context.set_line_width(self.line_width);
         context.begin_path();
         context.move_to(self.start.x, self.start.y);
         context.line_to(self.end.x, self.end.y);
         context.stroke();
     }   
+
+    fn draw_xor(&self, context: &CanvasRenderingContext2d){
+        context.save();
+        context.set_global_composite_operation("xor").expect("something goes wrong when apply xor");
+
+        context.begin_path();
+        context.move_to(self.start.x, self.start.y);
+        context.line_to(self.end.x, self.end.y);
+        context.close_path();
+
+        context.set_stroke_style(&JsValue::from_str(&self.color));
+        context.set_line_width(self.line_width);
+
+        context.stroke();
+        context.restore();
+    }
 }
 
 pub struct Svg{
@@ -795,6 +879,26 @@ impl Shape for Svg{
         2.0
     }
 
+    fn is_hit(&self, x: f64, y: f64) -> bool {
+        false        
+    }
+
+    fn set_hovered(&mut self, hovered: bool) {
+        if hovered {
+            self.content = r#"
+                <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+                    <rect x="10" y="10" width="80" height="80" fill="red" />
+                </svg>
+            "#.to_string();
+        } else {
+            self.content = r#"
+                <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+                    <rect x="10" y="10" width="80" height="80" fill="blue" />
+                </svg>
+            "#.to_string();
+        }
+    }
+
     fn draw(&mut self, context: &CanvasRenderingContext2d){
         let parser = DomParser::new().unwrap();
         let doc = parser.parse_from_string(&self.content, web_sys::SupportedType::ImageSvgXml).unwrap();
@@ -806,5 +910,8 @@ impl Shape for Svg{
         } else {
             web_sys::console::log_1(&"⚠️ SVG 파싱 실패".into());
         }
+    }
+
+    fn draw_xor(&self, context: &CanvasRenderingContext2d){
     }
 }

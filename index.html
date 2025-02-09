@@ -139,15 +139,19 @@
     <!-- 🎨 중앙 캔버스 컨테이너 -->
     <div class="main-container">
       <div class="controls">
-          <input type="color" id="color-picker" value="#0000FF">
-          <input type="range" id="line-width" min="1" max="10" value="2">
-          <button id="clear-btn">지우기</button>
-          <button id="save-btn" class="save-btn">저장</button>
+        <button id="selection-mode">🔲 Selection Mode</button>
+        <button id="pencil-mode">✏️ Pencil Mode</button>
+        <button id="line-mode">📏 Line Mode</button>
+
+        <input type="color" id="color-picker" value="#0000FF">
+        <input type="range" id="line-width" min="1" max="10" value="2">
+        <button id="clear-btn">지우기</button>
+        <button id="save-btn" class="save-btn">저장</button>
       </div>
 
         <div class="canvas-container">
             <!-- 캔버스 -->
-            <canvas id="drawing-canvas" width="1024" height="768"></canvas>
+            <canvas id="drawing-canvas" width="1600" height="900"></canvas>
         </div>
     </div>
 
