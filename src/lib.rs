@@ -229,7 +229,7 @@ pub fn start() -> Result<(), JsValue> {
         info!("svg data={svg_data}"); // 값을 콘솔에 출력
 
         let mut svg = Svg::new(Point2D::new(x, y), svg_data); 
-        svg.draw(context);
+        svg.draw(context, 1.0);
         SHAPES.with(|shapes| {
             shapes.borrow_mut().push(Box::new(svg));
         });
@@ -553,7 +553,7 @@ fn redraw(context: &CanvasRenderingContext2d) {
 
         SHAPES.with(|shapes| {
             for shape in shapes.borrow_mut().iter_mut() {
-                shape.draw(context);
+                shape.draw(context, state.borrow().scale());
             }
         });
     });

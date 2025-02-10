@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::iter::Scan;
 use std::str;
 use std::task::Context;
 use log::info;
@@ -36,7 +37,7 @@ pub trait Shape{
     fn line_width(&self) -> f64 { 2.0 }
     fn is_hit(&self, x: f64, y: f64) -> bool;
     fn set_hovered(&mut self, hovered: bool);
-    fn draw(&mut self, context: &CanvasRenderingContext2d);
+    fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64);
     fn draw_xor(&self, context: &CanvasRenderingContext2d);
 }
 
@@ -82,9 +83,10 @@ impl Shape for Pencil{
         }
     }
 
-    fn draw(&mut self, context: &CanvasRenderingContext2d){
+    fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64){
         context.set_stroke_style(&JsValue::from_str(&self.color));
-        context.set_line_width(self.line_width);
+        let adjusted_width = self.line_width / scale;
+        context.set_line_width(adjusted_width);
         context.begin_path();
         
         if let Some(start) = self.points.first(){
@@ -166,9 +168,10 @@ impl Shape for Line{
         */
     }
 
-    fn draw(&mut self, context: &CanvasRenderingContext2d){
+    fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64){
         context.set_stroke_style(&JsValue::from_str(&self.color));
-        context.set_line_width(self.line_width);
+        let adjusted_width = self.line_width / scale;
+        context.set_line_width(adjusted_width);
         context.begin_path();
         context.move_to(self.start.x, self.start.y);
         context.line_to(self.end.x, self.end.y);
@@ -899,7 +902,7 @@ impl Shape for Svg{
         }
     }
 
-    fn draw(&mut self, context: &CanvasRenderingContext2d){
+    fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64){
         let parser = DomParser::new().unwrap();
         let doc = parser.parse_from_string(&self.content, web_sys::SupportedType::ImageSvgXml).unwrap();
 
