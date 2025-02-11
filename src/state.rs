@@ -1,12 +1,11 @@
 use std::{mem::offset_of, str, fmt};
 use log::info;
 
-use crate::shape::Point2D;
+use crate::shape::{Point2D, Shape};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ActionMode {
     Selection,
-    Panning,
     Drawing,
 }
 
@@ -14,7 +13,6 @@ impl fmt::Display for ActionMode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ActionMode::Selection => write!(f, "Selection Mode"),
-            ActionMode::Panning => write!(f, "Panning Mode"),
             ActionMode::Drawing => write!(f, "Drawing Mode"),
         }
     }
@@ -37,17 +35,32 @@ impl fmt::Display for DrawingMode {
 
 #[derive(Debug, Clone)]
 pub struct State{
+    is_panning: bool,
     action_mode: ActionMode,
     drawing_mode: DrawingMode,
     color: String,  // 기본 색상: 파란색
     line_width: f64,// 기본 선 굵기
     scale: f64,     // 기본 스케일
-    offset: Point2D
+    offset: Point2D,
+    fill_color: String,
 }
 
 impl State{
     pub fn new(color: String, line_width: f64) -> Self {
-        State{action_mode: ActionMode::Drawing, drawing_mode: DrawingMode::Line, color: color, line_width: line_width, scale: 1.0, offset: Point2D::new(0.0, 0.0)}
+        State {
+            is_panning: false,
+            action_mode: ActionMode::Drawing,
+            drawing_mode: DrawingMode::Line,
+            color: color,
+            line_width: line_width,
+            scale: 1.0,
+            offset: Point2D::new(0.0, 0.0),
+            fill_color: String::from("#ffffff")
+        }
+    }
+
+    pub fn fill_color(&self) -> &str{
+        &self.fill_color
     }
 
     pub fn color(&self) -> &str {
@@ -87,13 +100,20 @@ impl State{
         self.offset.set_y(value.y);
     }
 
+    pub fn is_panning(&self) -> bool{
+        self.is_panning
+    }
+
+    pub fn set_is_panning(&mut self, value: &bool){
+        self.is_panning = value.clone();
+    }
+
     pub fn action_mode(&self) -> &ActionMode {
         &self.action_mode
     }
 
     pub fn set_action_mode(&mut self, value: &ActionMode) {
         self.action_mode = value.clone();
-        info!("selected mode {:?}", self.action_mode);
     }
 
     pub fn drawing_mode(&self) -> &DrawingMode{

@@ -100,6 +100,19 @@
       cursor: pointer;
     }
 
+    button {
+        margin: 5px;
+        padding: 10px;
+        font-size: 14px;
+        cursor: pointer;
+        border: 2px solid #333;
+        background-color: #f0f0f0;
+    }
+    button.active {
+        background-color: #4CAF50;
+        color: white;
+    }
+
     .save-btn {
       margin-left: auto; /* 🎯 저장 버튼을 오른쪽 정렬 */
     }
@@ -139,9 +152,11 @@
     <!-- 🎨 중앙 캔버스 컨테이너 -->
     <div class="main-container">
       <div class="controls">
-        <button id="selection-mode">🔲 Selection Mode</button>
-        <button id="pencil-mode">✏️ Pencil Mode</button>
-        <button id="line-mode">📏 Line Mode</button>
+        <div class="toolbar">
+          <button id="selection-mode">🔲 Selection Mode</button>
+          <button id="pencil-mode">✏️ Pencil Mode</button>
+          <button id="line-mode">📏 Line Mode</button>
+        </div>
 
         <input type="color" id="color-picker" value="#0000FF">
         <input type="range" id="line-width" min="1" max="10" value="2">

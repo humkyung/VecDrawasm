@@ -36,19 +36,23 @@ pub trait Shape{
     fn color(&self) -> &str;
     fn line_width(&self) -> f64 { 2.0 }
     fn is_hit(&self, x: f64, y: f64) -> bool;
+    fn is_selected(&self) -> bool;
+    fn set_selected(&mut self, selected: bool);
     fn set_hovered(&mut self, hovered: bool);
     fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64);
-    fn draw_xor(&self, context: &CanvasRenderingContext2d);
+    fn draw_xor(&self, context: &CanvasRenderingContext2d, scale: f64);
 }
 
 pub struct Pencil{
+    selected: bool,
+    hovered: bool,
     color: String,
     line_width: f64,
     points: Vec<Point2D>,
 }
 impl Pencil{
     pub fn new(color: String, line_width: f64, points: Vec<Point2D>) -> Self {
-        Pencil{color, line_width, points}
+        Pencil{selected: false, hovered: false, color, line_width, points}
     }
 
     pub fn add_point(&mut self, point: Point2D){
@@ -75,16 +79,25 @@ impl Shape for Pencil{
         false        
     }
 
-    fn set_hovered(&mut self, hovered: bool) {
-        if hovered {
-            self.color = "#ff0000".to_string();
-        } else {
-            self.color = "#000000".to_string();
-        }
+    fn is_selected(&self) -> bool {
+        self.selected
+    }
+
+    fn set_selected(&mut self, selected: bool){
+        self.selected = selected;
+    }
+
+    fn set_hovered(&mut self, value: bool) {
+        self.hovered = value;
     }
 
     fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64){
-        context.set_stroke_style(&JsValue::from_str(&self.color));
+        if self.hovered{
+            context.set_stroke_style(&JsValue::from_str("#ff0000"));
+        }
+        else{
+            context.set_stroke_style(&JsValue::from_str(&self.color));
+        }
         let adjusted_width = self.line_width / scale;
         context.set_line_width(adjusted_width);
         context.begin_path();
@@ -98,7 +111,7 @@ impl Shape for Pencil{
         }
     }   
 
-    fn draw_xor(&self, context: &CanvasRenderingContext2d){
+    fn draw_xor(&self, context: &CanvasRenderingContext2d, scale: f64){
         if let Some(start) = self.points.first(){
             context.set_global_composite_operation("xor").unwrap();
 
@@ -109,7 +122,8 @@ impl Shape for Pencil{
             }
 
             context.set_stroke_style(&JsValue::from_str(&self.color));
-            context.set_line_width(self.line_width);
+            let adjusted_width = self.line_width / scale;
+            context.set_line_width(adjusted_width);
 
             context.stroke();
 
@@ -120,6 +134,8 @@ impl Shape for Pencil{
 
 #[derive(Debug, Clone)]
 pub struct Line{
+    selected: bool,
+    hovered: bool,
     color: String,
     line_width: f64,
     start: Point2D,
@@ -127,7 +143,7 @@ pub struct Line{
 }
 impl Line {
     pub fn new(color: String, line_width: f64, start: Point2D, end: Point2D) -> Self {
-        Line {color, line_width, start, end}
+        Line {selected: false, hovered: false, color, line_width, start, end}
     }
 }
 
@@ -158,18 +174,25 @@ impl Shape for Line{
         dx * dx + dy * dy < 25.0
     }
 
-    fn set_hovered(&mut self, hovered: bool) {
-        /*
-        if hovered {
-            self.color = "#ff0000".to_string();
-        } else {
-            self.color = "#000000".to_string();
-        }
-        */
+    fn is_selected(&self) -> bool {
+        self.selected
+    }
+
+    fn set_selected(&mut self, selected: bool){
+        self.selected = selected;
+    }
+
+    fn set_hovered(&mut self, value: bool) {
+        self.hovered = value;
     }
 
     fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64){
-        context.set_stroke_style(&JsValue::from_str(&self.color));
+        if self.hovered{
+            context.set_stroke_style(&JsValue::from_str("#ff0000"));
+        }
+        else{
+            context.set_stroke_style(&JsValue::from_str(&self.color));
+        }
         let adjusted_width = self.line_width / scale;
         context.set_line_width(adjusted_width);
         context.begin_path();
@@ -178,7 +201,7 @@ impl Shape for Line{
         context.stroke();
     }   
 
-    fn draw_xor(&self, context: &CanvasRenderingContext2d){
+    fn draw_xor(&self, context: &CanvasRenderingContext2d, scale: f64){
         context.save();
         context.set_global_composite_operation("xor").expect("something goes wrong when apply xor");
 
@@ -188,7 +211,8 @@ impl Shape for Line{
         context.close_path();
 
         context.set_stroke_style(&JsValue::from_str(&self.color));
-        context.set_line_width(self.line_width);
+        let adjusted_width = self.line_width / scale;
+        context.set_line_width(adjusted_width);
 
         context.stroke();
         context.restore();
@@ -196,6 +220,7 @@ impl Shape for Line{
 }
 
 pub struct Svg{
+    selected: bool,
     location: Point2D,
     content: String,
 
@@ -204,7 +229,7 @@ pub struct Svg{
 
 impl Svg{
     pub fn new(location: Point2D, svg_text: &str) -> Self {
-        Svg{location, content: svg_text.to_string(), styles: None}
+        Svg{selected: false, location, content: svg_text.to_string(), styles: None}
     }
 
     // 🎯 SVG에서 Gradient를 추출하는 함수
@@ -886,6 +911,14 @@ impl Shape for Svg{
         false        
     }
 
+    fn is_selected(&self) -> bool {
+        self.selected
+    }
+
+    fn set_selected(&mut self, selected: bool){
+        self.selected = selected;
+    }
+
     fn set_hovered(&mut self, hovered: bool) {
         if hovered {
             self.content = r#"
@@ -915,6 +948,6 @@ impl Shape for Svg{
         }
     }
 
-    fn draw_xor(&self, context: &CanvasRenderingContext2d){
+    fn draw_xor(&self, context: &CanvasRenderingContext2d, scale: f64){
     }
 }

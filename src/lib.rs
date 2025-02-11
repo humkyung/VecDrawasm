@@ -74,12 +74,6 @@ pub fn start() -> Result<(), JsValue> {
     // 드로잉 포인트
     let mouse_context_points: Rc<RefCell<Vec<Point2D>>> = Rc::new(RefCell::new(Vec::new()));
 
-    // 모드 설정: 팬 또는 드로잉
-    let current_mode = Rc::new(RefCell::new("panning".to_string())); // "panning" 또는 "drawing"
-
-    // 캔버스 초기화
-    let fill_color = JsValue::from_str("#ffffff"); // JsValue로 변환
-
     // 🎨 드래그 앤 드롭 이벤트 추가
     let canvas_clone = Rc::new(canvas.clone());
     let context_clone = Rc::new(context.clone());
@@ -263,7 +257,7 @@ pub fn start() -> Result<(), JsValue> {
                 // 잔상 방지를 위해 전체 캔버스를 리셋
                 context_clone.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).unwrap(); // 변환 초기화
                 context_clone.clear_rect(0.0, 0.0, client_rect.width(), client_rect.height()); // 전체 캔버스 지우기
-                context_clone.set_fill_style(&"#ffffff".into());
+                context_clone.set_fill_style(&JsValue::from_str(state.borrow().fill_color()));
                 context_clone.fill_rect(0.0, 0.0, client_rect.width(), client_rect.height());
 
                 // 캔버스 다시 그리기
@@ -285,9 +279,7 @@ pub fn start() -> Result<(), JsValue> {
                 IS_MOUSE_PRESSED.with(|pressed| *pressed.borrow_mut() = true);
 
                 if event.button() == 1 {
-                    state.borrow_mut().set_action_mode(&state::ActionMode::Panning);
-                }else {
-                    state.borrow_mut().set_action_mode(&state::ActionMode::Drawing);
+                    state.borrow_mut().set_is_panning(&true);
                 }
 
                 // ✅ 현재 캔버스 상태 백업 (이전 선택 영역 복원용)
@@ -340,7 +332,7 @@ pub fn start() -> Result<(), JsValue> {
                 
                 IS_MOUSE_PRESSED.with(|pressed|{
                     if *pressed.borrow() {
-                        if state.borrow().action_mode() == &state::ActionMode::Panning {
+                        if state.borrow().is_panning() {
                             let dx = mouse_x - last_x;
                             let dy = mouse_y - last_y;
 
@@ -396,7 +388,7 @@ pub fn start() -> Result<(), JsValue> {
 
                                         let end_point = Point2D::new(current_x, current_y);
                                         let line = Line::new(state.borrow().color().to_string(), state.borrow().line_width(), start_point, end_point);
-                                        line.draw_xor(&context_clone);
+                                        line.draw_xor(&context_clone, state.borrow().scale());
                                         *ghost.borrow_mut() = Some(Box::new(line));
 
                                         if mouse_context_points.borrow().len() == 1{
@@ -420,12 +412,12 @@ pub fn start() -> Result<(), JsValue> {
 
                             for shape in shapes.iter_mut() {
                                 if shape.is_hit(current_x, current_y) {
-                                    //shape.set_hovered(true);
+                                    shape.set_hovered(true);
                                 } else {
-                                    //shape.set_hovered(false);
+                                    shape.set_hovered(false);
                                 }
 
-                                //shape.draw(&context_clone);
+                                shape.draw(&context_clone, state.borrow().scale());
                             }
                         });
                     }
@@ -445,7 +437,7 @@ pub fn start() -> Result<(), JsValue> {
         add_event_listener(&canvas, "mouseup", move |event: MouseEvent| {
             STATE.with(|state| {
                 IS_MOUSE_PRESSED.with(|pressed| *pressed.borrow_mut() = false);
-                state.borrow_mut().set_action_mode(&ActionMode::Drawing);
+                state.borrow_mut().set_is_panning(&false);
 
                 // ✅ 선택 영역 확정 후, 캔버스 백업 초기화
                 IMAGE_BACKUP.with(|backup| *backup.borrow_mut() = None);
@@ -541,14 +533,14 @@ fn redraw(context: &CanvasRenderingContext2d) {
         // 잔상 방지를 위해 전체 캔버스를 리셋
         context.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).unwrap(); // 변환 초기화
         context.clear_rect(0.0, 0.0, canvas_width, canvas_height); // 전체 캔버스 지우기
-        context.set_fill_style(&"#ffffff".into());
+        context.set_fill_style(&JsValue::from_str(state.borrow().fill_color()));
         context.fill_rect(0.0, 0.0, canvas_width, canvas_height);
 
         // 줌 및 팬 적용 (기존의 scale과 offset 유지)
         context.set_transform(state.borrow().scale(), 0.0, 0.0, state.borrow().scale(), state.borrow().offset().x, state.borrow().offset().y).unwrap();
 
         context.clear_rect(0.0, 0.0, canvas_width, canvas_height);
-        context.set_fill_style(&"#ffffff".into());
+        context.set_fill_style(&JsValue::from_str(state.borrow().fill_color()));
         context.fill_rect(0.0, 0.0, canvas_width, canvas_height);
 
         SHAPES.with(|shapes| {
@@ -562,17 +554,63 @@ fn redraw(context: &CanvasRenderingContext2d) {
 fn setup_mode_buttons() {
     let document = window().unwrap().document().unwrap();
 
-    let selection_button = document.get_element_by_id("selection-mode").unwrap();
-    let pencil_button = document.get_element_by_id("pencil-mode").unwrap();
-    let line_button = document.get_element_by_id("line-mode").unwrap();
+    let selection_button = document.get_element_by_id("selection-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+    let pencil_button = document.get_element_by_id("pencil-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+    let line_button = document.get_element_by_id("line-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
 
-    let set_mode = |mode: state::DrawingMode| {
-        STATE.with(|state| state.borrow_mut().set_drawing_mode(&mode));
+    // Function to update active button UI
+    let update_ui = move |active_button: &HtmlElement| {
+        let selection_button = selection_button.clone();
+        let pencil_button = pencil_button.clone();
+        let line_button = line_button.clone();
+
+        selection_button.set_class_name("");
+        pencil_button.set_class_name("");
+        line_button.set_class_name("");
+
+        active_button.set_class_name("active");
     };
 
-    //add_click_listener(&selection_button, move || set_mode(state::ActionMode::Selection));
-    add_click_listener(&pencil_button, move || set_mode(state::DrawingMode::Pencil));
-    add_click_listener(&line_button, move || set_mode(state::DrawingMode::Line));
+    // Selection mode Handler
+    {
+        let selection_button = document.get_element_by_id("selection-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+        let selection_button_clone = selection_button.clone();
+        let update_ui_clone = update_ui.clone();
+        add_click_listener(&selection_button, move || {
+            STATE.with(|state| {
+                state.borrow_mut().set_action_mode(&ActionMode::Selection);
+            });
+            update_ui_clone(&selection_button_clone);
+        });
+    }
+
+    // Pencil mode Handler
+    {
+        let pencil_button = document.get_element_by_id("pencil-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+        let pencil_button_clone = pencil_button.clone();
+        let update_ui_clone = update_ui.clone();
+        add_click_listener(&pencil_button, move || {
+            STATE.with(|state| {
+                state.borrow_mut().set_action_mode(&ActionMode::Drawing);
+                state.borrow_mut().set_drawing_mode(&DrawingMode::Pencil);
+            });
+            update_ui_clone(&pencil_button_clone);
+        });
+    }
+
+    // Line mode Handler
+    {
+        let line_button = document.get_element_by_id("line-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+        let line_button_clone = line_button.clone();
+        let update_ui_clone = update_ui.clone();
+        add_click_listener(&line_button, move || {
+            STATE.with(|state| {
+                state.borrow_mut().set_action_mode(&ActionMode::Drawing);
+                state.borrow_mut().set_drawing_mode(&DrawingMode::Line);
+            });
+            update_ui_clone(&line_button_clone);
+        });
+    }
 }
 
 fn add_click_listener(element: &web_sys::Element, callback: impl Fn() + 'static) {
