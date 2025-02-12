@@ -39,10 +39,13 @@ pub trait Shape{
     fn is_selected(&self) -> bool;
     fn set_selected(&mut self, selected: bool);
     fn set_hovered(&mut self, hovered: bool);
+    fn move_by(&mut self, dx: f64, dy: f64);
     fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64);
     fn draw_xor(&self, context: &CanvasRenderingContext2d, scale: f64);
+    fn draw_control_points(&self, context: &CanvasRenderingContext2d, scale: f64);
 }
 
+#[derive(Debug, Clone)]
 pub struct Pencil{
     selected: bool,
     hovered: bool,
@@ -91,6 +94,13 @@ impl Shape for Pencil{
         self.hovered = value;
     }
 
+    fn move_by(&mut self, dx: f64, dy: f64) {
+        for point in self.points.iter_mut(){
+            point.x += dx;
+            point.y += dy;
+        }
+    }
+
     fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64){
         if self.hovered{
             context.set_stroke_style(&JsValue::from_str("#ff0000"));
@@ -109,6 +119,8 @@ impl Shape for Pencil{
             }
             context.stroke();
         }
+
+        if self.selected{ self.draw_control_points(context, scale);}
     }   
 
     fn draw_xor(&self, context: &CanvasRenderingContext2d, scale: f64){
@@ -124,10 +136,20 @@ impl Shape for Pencil{
             context.set_stroke_style(&JsValue::from_str(&self.color));
             let adjusted_width = self.line_width / scale;
             context.set_line_width(adjusted_width);
-
             context.stroke();
 
             context.set_global_composite_operation("source-over").unwrap(); // 기본 모드로 복원
+        }
+    }
+
+    fn draw_control_points(&self, context: &CanvasRenderingContext2d, scale: f64) {
+        context.set_fill_style(&"#FF0000".into()); // Red control points
+
+        let adjusted_width = 1.0 / scale * 5.0;
+        for point in self.points.clone(){
+            context.begin_path();
+            context.rect(point.x - adjusted_width, point.y - adjusted_width, adjusted_width * 2.0, adjusted_width * 2.0);
+            context.fill();
         }
     }
 }
@@ -180,12 +202,23 @@ impl Shape for Line{
 
     fn set_selected(&mut self, selected: bool){
         self.selected = selected;
+        info!("selected = {:?}", self.selected);
     }
 
     fn set_hovered(&mut self, value: bool) {
         self.hovered = value;
     }
 
+    fn move_by(&mut self, dx: f64, dy: f64) {
+        self.start.x += dx;
+        self.start.y += dy;
+        self.end.x += dx;
+        self.end.y += dy;
+    }
+
+    /*
+        라인을 캔버스에 그린다.
+     */
     fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64){
         if self.hovered{
             context.set_stroke_style(&JsValue::from_str("#ff0000"));
@@ -198,7 +231,10 @@ impl Shape for Line{
         context.begin_path();
         context.move_to(self.start.x, self.start.y);
         context.line_to(self.end.x, self.end.y);
+        context.close_path();
         context.stroke();
+
+        if self.selected{ self.draw_control_points(context, scale);}
     }   
 
     fn draw_xor(&self, context: &CanvasRenderingContext2d, scale: f64){
@@ -217,8 +253,19 @@ impl Shape for Line{
         context.stroke();
         context.restore();
     }
+
+    fn draw_control_points(&self, context: &CanvasRenderingContext2d, scale: f64) {
+        context.set_fill_style(&"#FF0000".into()); // Red control points
+
+        let adjusted_width = 1.0 / scale * 5.0;
+        context.begin_path();
+        context.rect(self.start.x - adjusted_width, self.start.y - adjusted_width, adjusted_width * 2.0, adjusted_width * 2.0);
+        context.rect(self.end.x - adjusted_width, self.end.y - adjusted_width, adjusted_width * 2.0, adjusted_width * 2.0);
+        context.fill();
+    }
 }
 
+#[derive(Debug, Clone)]
 pub struct Svg{
     selected: bool,
     location: Point2D,
@@ -921,18 +968,12 @@ impl Shape for Svg{
 
     fn set_hovered(&mut self, hovered: bool) {
         if hovered {
-            self.content = r#"
-                <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
-                    <rect x="10" y="10" width="80" height="80" fill="red" />
-                </svg>
-            "#.to_string();
         } else {
-            self.content = r#"
-                <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
-                    <rect x="10" y="10" width="80" height="80" fill="blue" />
-                </svg>
-            "#.to_string();
         }
+    }
+
+    fn move_by(&mut self, dx: f64, dy: f64) {
+        
     }
 
     fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64){
@@ -949,5 +990,8 @@ impl Shape for Svg{
     }
 
     fn draw_xor(&self, context: &CanvasRenderingContext2d, scale: f64){
+    }
+
+    fn draw_control_points(&self, context: &CanvasRenderingContext2d, scale: f64) {
     }
 }

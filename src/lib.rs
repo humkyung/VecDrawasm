@@ -1,3 +1,4 @@
+use js_sys::Math::acosh;
 use js_sys::Promise;
 use log::info;
 use state::{ActionMode, DrawingMode};
@@ -237,8 +238,6 @@ pub fn start() -> Result<(), JsValue> {
         let client_rect = canvas.get_bounding_client_rect();
 
         add_wheelevent_listener(&canvas, "wheel", move |event: WheelEvent| {
-            info!("wheel"); // 값을 콘솔에 출력
-
             event.prevent_default();
 
             STATE.with(|state| {
@@ -275,11 +274,34 @@ pub fn start() -> Result<(), JsValue> {
         let mouse_context_points= Rc::clone(&mouse_context_points);
 
         add_event_listener(&canvas, "mousedown", move |event: MouseEvent| {
+            // 마우스 위치 저장
+            let mouse_x = event.client_x() as f64 - client_rect.left();
+            let mouse_y = event.client_y() as f64 - client_rect.top();
+
+            let window = web_sys::window().unwrap();
+            let scroll_x = window.scroll_x().unwrap_or(0.0);
+            let scroll_y = window.scroll_y().unwrap_or(0.0);
+
             STATE.with(|state| {
                 IS_MOUSE_PRESSED.with(|pressed| *pressed.borrow_mut() = true);
 
                 if event.button() == 1 {
                     state.borrow_mut().set_is_panning(&true);
+                }else if state.borrow().action_mode() == &state::ActionMode::Selection{
+                    let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
+                    SHAPES.with(|shapes| {
+                        let mut shapes = shapes.borrow_mut(); // 직접 mutable reference 가져오기
+
+                        for shape in shapes.iter_mut() {
+                            if shape.is_hit(current_x, current_y) {
+                                shape.set_selected(true);
+                            } else {
+                                shape.set_selected(false);
+                            }
+
+                            shape.draw(&context_clone, state.borrow().scale());
+                        }
+                    });
                 }
 
                 // ✅ 현재 캔버스 상태 백업 (이전 선택 영역 복원용)
@@ -289,13 +311,8 @@ pub fn start() -> Result<(), JsValue> {
                 });
 
                 // 마우스 위치 저장
-                let mouse_x = event.client_x() as f64 - client_rect.left();
-                let mouse_y = event.client_y() as f64 - client_rect.top();
                 *last_mouse_pos.borrow_mut() = (mouse_x, mouse_y);
 
-                let window = web_sys::window().unwrap();
-                let scroll_x = window.scroll_x().unwrap_or(0.0);
-                let scroll_y = window.scroll_y().unwrap_or(0.0);
                 let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
                 mouse_context_points.borrow_mut().push(Point2D { x: current_x, y: current_y });
             });
@@ -328,8 +345,6 @@ pub fn start() -> Result<(), JsValue> {
             let mouse_y = event.client_y() as f64 - client_rect.top();
 
             STATE.with(|state| {
-                info!("mouse move event button={:?}", event.button()); // 값을 콘솔에 출력
-                
                 IS_MOUSE_PRESSED.with(|pressed|{
                     if *pressed.borrow() {
                         if state.borrow().is_panning() {
@@ -403,6 +418,9 @@ pub fn start() -> Result<(), JsValue> {
                                 }
                             });
                         }
+                        else{
+
+                        }
                     }
                     else{
                         let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
@@ -442,10 +460,27 @@ pub fn start() -> Result<(), JsValue> {
                 // ✅ 선택 영역 확정 후, 캔버스 백업 초기화
                 IMAGE_BACKUP.with(|backup| *backup.borrow_mut() = None);
 
-                let pencil = Pencil::new(state.borrow().color().to_string(), state.borrow().line_width(), mouse_context_points.borrow().clone());
-                SHAPES.with(|shapes| {
-                    shapes.borrow_mut().push(Box::new(pencil));
-                });
+                if state.borrow().action_mode() == &ActionMode::Drawing{
+                    let state_ref = state.borrow();
+                    let drawing_mode = state_ref.drawing_mode();
+                    match drawing_mode{
+                        DrawingMode::Pencil =>{
+                            let pencil = Pencil::new(state.borrow().color().to_string(), state.borrow().line_width(), mouse_context_points.borrow().clone());
+                            SHAPES.with(|shapes| {
+                                shapes.borrow_mut().push(Box::new(pencil));
+                            });
+                        }
+                        DrawingMode::Line =>{
+                            let mouse_context_points_ref = mouse_context_points.borrow();
+                            let start = mouse_context_points_ref.get(0).unwrap();
+                            let end = mouse_context_points_ref.get(mouse_context_points.borrow().len() - 1).unwrap();
+                            let line = Line::new(state.borrow().color().to_string(), state.borrow().line_width(), *start, *end);
+                            SHAPES.with(|shapes| {
+                                shapes.borrow_mut().push(Box::new(line));
+                            });
+                        }
+                    }
+                }
 
                 mouse_context_points.borrow_mut().clear();
 
@@ -520,6 +555,11 @@ pub fn start() -> Result<(), JsValue> {
     }
 
     Ok(())
+}
+
+fn get_selected_shapes() -> Vec<Box<dyn Shape>>  {
+    SHAPES.with(|shapes| {
+    })
 }
 
 // 캔버스 다시 그리기
