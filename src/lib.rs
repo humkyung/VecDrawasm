@@ -1,5 +1,6 @@
 use js_sys::Math::acosh;
 use js_sys::Promise;
+use js_sys::Uint32Array;
 use log::info;
 use state::{ActionMode, DrawingMode};
 use wasm_bindgen::prelude::*;
@@ -7,7 +8,8 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::DomRect;
 use web_sys::{window, Document, CanvasRenderingContext2d, HtmlCanvasElement, HtmlInputElement, HtmlImageElement, MouseEvent, WheelEvent, DragEvent, File, FileReader, Element, Path2d
-    , HtmlDivElement , DomParser, HtmlElement, Node, NodeList, ImageData, Blob};
+    , HtmlDivElement , DomParser, HtmlElement, Node, NodeList, ImageData, Blob, KeyboardEvent};
+use std::char::UNICODE_VERSION;
 use std::rc::Rc;
 use std::cell::RefCell;
 
@@ -66,6 +68,8 @@ pub fn start() -> Result<(), JsValue> {
 
     // ✅ 모드 선택 UI
     setup_mode_buttons();
+
+    setup_keyboard_shortcuts();
 
     // 초기 캔버스 상태
     let last_mouse_pos = Rc::new(RefCell::new((0.0, 0.0)));
@@ -289,17 +293,19 @@ pub fn start() -> Result<(), JsValue> {
                     state.borrow_mut().set_is_panning(&true);
                 }else if state.borrow().action_mode() == &state::ActionMode::Selection{
                     let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
-                    SHAPES.with(|shapes| {
-                        let mut shapes = shapes.borrow_mut(); // 직접 mutable reference 가져오기
 
-                        for shape in shapes.iter_mut() {
-                            if shape.is_hit(current_x, current_y) {
-                                shape.set_selected(true);
-                            } else {
-                                shape.set_selected(false);
+                    let unders = get_shapes_under_mouse(current_x, current_y);
+                    let selected = get_selected_shapes();
+                    SHAPES.with(|shapes| {
+                        let selected_indices: Vec<u32> = unders.clone(); // ✅ Store indices first
+
+                        let selection_changed: bool = (unders.is_empty() && !selected.is_empty()) || !unders.iter().all(|ele| selected.contains(ele));
+                        if selection_changed{
+                            for (index, shape) in shapes.borrow_mut().iter_mut().enumerate() {
+                                shape.set_selected(selected_indices.contains(&(index as u32)));
                             }
 
-                            shape.draw(&context_clone, state.borrow().scale());
+                            redraw(&context_clone);
                         }
                     });
                 }
@@ -419,7 +425,25 @@ pub fn start() -> Result<(), JsValue> {
                             });
                         }
                         else{
+                            let selected = get_selected_shapes();
+                            if selected.len() > 0{
+                                let (last_x, last_y) = calculate_canvas_coordinates((last_x, last_y), (scroll_x, scroll_y));
+                                let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
+                                let dx = current_x - last_x;
+                                let dy = current_y - last_y;
 
+                                SHAPES.with(|shapes| {
+                                    let mut shapes = shapes.borrow_mut();
+
+                                    for idx in selected{
+                                        if let Some(shape) = shapes.get_mut(idx as usize) {
+                                            shape.move_by(dx, dy);
+                                        }
+                                    }
+                                });
+
+                                redraw(&context_clone);
+                            }
                         }
                     }
                     else{
@@ -557,8 +581,93 @@ pub fn start() -> Result<(), JsValue> {
     Ok(())
 }
 
-fn get_selected_shapes() -> Vec<Box<dyn Shape>>  {
+pub fn setup_keyboard_shortcuts() {
+    let window = window().unwrap();
+
+    let closure = Closure::wrap(Box::new(move |event: KeyboardEvent| {
+        if event.ctrl_key() && event.key() == "a" {
+            event.prevent_default(); // ✅ Prevent default browser "Select All" behavior
+            let _ = select_all_shapes(true);
+        }
+        else if event.key() == "Escape"{
+            event.prevent_default(); // ✅ Prevent default behavior
+            let _ = select_all_shapes(false);
+        }
+    }) as Box<dyn FnMut(_)>);
+
+    window.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref()).unwrap();
+    closure.forget();
+}
+
+/// Selects all shapes in `SHAPES`
+fn select_all_shapes(selected: bool) -> Result<(), JsValue> {
+    // 브라우저의 Window 및 Document 객체 가져오기
+    let window = web_sys::window().expect("No global window exists");
+    let document = window.document().expect("Should have a document on window");
+
+    // HTML5 캔버스 가져오기
+    let canvas = document
+        .get_element_by_id("drawing-canvas")
+        .expect("Canvas element not found")
+        .dyn_into::<HtmlCanvasElement>()?;
+
+    // 캔버스 2D 렌더링 컨텍스트 가져오기
+    // ✅ Get 2D Rendering Context
+    let context = canvas
+        .get_context("2d")?
+        .ok_or("Failed to get 2D context")?
+        .dyn_into::<CanvasRenderingContext2d>()?;
+
+
     SHAPES.with(|shapes| {
+        for shape in shapes.borrow_mut().iter_mut() {
+            shape.set_selected(selected);
+        }
+    });
+
+    redraw(&context);
+
+    Ok(())
+
+}
+
+/*
+    마우스 커서 아래에 있는 Shape의 인덱스를 리턴한다.
+*/
+fn get_shapes_under_mouse(x: f64, y: f64) -> Vec<u32>{
+    SHAPES.with(|shapes| {
+        shapes
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, shape)| {
+                if shape.is_hit(x, y) {
+                    Some(index as u32)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    })
+}
+
+/*
+    선택된 객체의 인덱스를 리턴한다.
+*/
+fn get_selected_shapes() -> Vec<u32>{
+    SHAPES.with(|shapes| {
+        shapes
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, shape)| {
+                if shape.is_selected() {
+                    Some(index as u32)
+                } else {
+                    None
+                }
+            })
+            .collect()
     })
 }
 
