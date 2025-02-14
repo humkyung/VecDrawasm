@@ -36,10 +36,12 @@ pub trait Shape{
     fn color(&self) -> &str;
     fn line_width(&self) -> f64 { 2.0 }
     fn is_hit(&self, x: f64, y: f64) -> bool;
+    fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32;
     fn is_selected(&self) -> bool;
     fn set_selected(&mut self, selected: bool);
     fn set_hovered(&mut self, hovered: bool);
     fn move_by(&mut self, dx: f64, dy: f64);
+    fn move_control_point_by(&mut self, index: i32, dx: f64, dy: f64);
     fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64);
     fn draw_xor(&self, context: &CanvasRenderingContext2d, scale: f64);
     fn draw_control_points(&self, context: &CanvasRenderingContext2d, scale: f64);
@@ -79,7 +81,20 @@ impl Shape for Pencil{
                 return true;
             }
         }
-        false        
+        false
+    }
+
+    fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
+        let adjusted_width = 1.0 / scale * 5.0;
+
+        for (index, point) in self.points.iter().enumerate() {
+            let dx = x - point.x;
+            let dy = y - point.y;
+            if dx * dx + dy * dy < adjusted_width * adjusted_width {
+                return index as i32;
+            }
+        }
+        -1
     }
 
     fn is_selected(&self) -> bool {
@@ -98,6 +113,15 @@ impl Shape for Pencil{
         for point in self.points.iter_mut(){
             point.x += dx;
             point.y += dy;
+        }
+    }
+
+    fn move_control_point_by(&mut self, index: i32, dx: f64, dy: f64) {
+        if index >=0 && index < self.points.len() as i32{
+            if let Some(point) = self.points.get_mut(index as usize){
+                point.x += dx;
+                point.y += dy;
+            }
         }
     }
 
@@ -196,6 +220,20 @@ impl Shape for Line{
         dx * dx + dy * dy < 25.0
     }
 
+    fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
+        let adjusted_width = 1.0 / scale * 5.0;
+
+        let dx = x - self.start.x;
+        let dy = y - self.start.y;
+        if dx * dx + dy * dy < adjusted_width * adjusted_width { return 0; }
+
+        let dx = x - self.end.x;
+        let dy = y - self.end.y;
+        if dx * dx + dy * dy < adjusted_width * adjusted_width { return 1; }
+
+        -1
+    }
+
     fn is_selected(&self) -> bool {
         self.selected
     }
@@ -214,6 +252,16 @@ impl Shape for Line{
         self.start.y += dy;
         self.end.x += dx;
         self.end.y += dy;
+    }
+
+    fn move_control_point_by(&mut self, index: i32, dx: f64, dy: f64) {
+        if index ==0{
+            self.start.x += dx;
+            self.start.y += dy;
+        } else if index == 1{
+            self.end.x += dx;
+            self.end.y += dy;
+        }
     }
 
     /*
@@ -958,6 +1006,10 @@ impl Shape for Svg{
         false        
     }
 
+    fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
+        -1
+    }
+
     fn is_selected(&self) -> bool {
         self.selected
     }
@@ -974,6 +1026,9 @@ impl Shape for Svg{
 
     fn move_by(&mut self, dx: f64, dy: f64) {
         
+    }
+
+    fn move_control_point_by(&mut self, index: i32, dx: f64, dy: f64) {
     }
 
     fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64){

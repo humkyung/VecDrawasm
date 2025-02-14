@@ -43,6 +43,7 @@ pub struct State{
     scale: f64,     // 기본 스케일
     offset: Point2D,
     fill_color: String,
+    selected_control_point: Option<(i32, i32)>  // shape index, control point index
 }
 
 impl State{
@@ -55,7 +56,8 @@ impl State{
             line_width: line_width,
             scale: 1.0,
             offset: Point2D::new(0.0, 0.0),
-            fill_color: String::from("#ffffff")
+            fill_color: String::from("#ffffff"),
+            selected_control_point: None
         }
     }
 
@@ -122,5 +124,13 @@ impl State{
 
     pub fn set_drawing_mode(&mut self, value: &DrawingMode) {
         self.drawing_mode = value.clone();
+    }
+
+    pub fn selected_control_point(&self) -> Option<(i32, i32)>{
+        self.selected_control_point
+    }
+
+    pub fn set_selected_control_point(&mut self, value: Option<(i32, i32)>){
+        self.selected_control_point = value;
     }
 }

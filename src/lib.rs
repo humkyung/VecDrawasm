@@ -10,6 +10,7 @@ use web_sys::DomRect;
 use web_sys::{window, Document, CanvasRenderingContext2d, HtmlCanvasElement, HtmlInputElement, HtmlImageElement, MouseEvent, WheelEvent, DragEvent, File, FileReader, Element, Path2d
     , HtmlDivElement , DomParser, HtmlElement, Node, NodeList, ImageData, Blob, KeyboardEvent};
 use std::char::UNICODE_VERSION;
+use std::fs::OpenOptions;
 use std::rc::Rc;
 use std::cell::RefCell;
 
@@ -307,6 +308,17 @@ pub fn start() -> Result<(), JsValue> {
 
                             redraw(&context_clone);
                         }
+
+                        for index in selected_indices {
+                            if let Some(shape) = shapes.borrow_mut().get_mut(index as usize) {
+                                let control_point_index = shape.get_control_point(current_x, current_y, state.borrow().scale());
+                                if control_point_index != -1 {
+                                    state.borrow_mut().set_selected_control_point(Some((index as i32, control_point_index)));
+                                    info!("selected shape : {index}, selected control point : {control_point_index}");
+                                    break;
+                                }
+                            }
+                        }
                     });
                 }
 
@@ -435,9 +447,16 @@ pub fn start() -> Result<(), JsValue> {
                                 SHAPES.with(|shapes| {
                                     let mut shapes = shapes.borrow_mut();
 
-                                    for idx in selected{
-                                        if let Some(shape) = shapes.get_mut(idx as usize) {
-                                            shape.move_by(dx, dy);
+                                    if let Some((selected_shape, selected_control_point)) = state.borrow().selected_control_point(){
+                                        if let Some(shape) = shapes.get_mut(selected_shape as usize){
+                                            shape.move_control_point_by(selected_control_point, dx, dy);
+                                        }
+                                    }
+                                    else {
+                                        for index in selected{
+                                            if let Some(shape) = shapes.get_mut(index as usize) {
+                                                shape.move_by(dx, dy);
+                                            }
                                         }
                                     }
                                 });
@@ -473,13 +492,13 @@ pub fn start() -> Result<(), JsValue> {
     // 마우스 업 이벤트 (팬 종료)
     {
         let context_clone = Rc::new(context.clone());
-
         let mouse_context_points= Rc::clone(&mouse_context_points);
 
-        add_event_listener(&canvas, "mouseup", move |event: MouseEvent| {
+        add_event_listener(&canvas, "mouseup", move |_event: MouseEvent| {
             STATE.with(|state| {
                 IS_MOUSE_PRESSED.with(|pressed| *pressed.borrow_mut() = false);
                 state.borrow_mut().set_is_panning(&false);
+                state.borrow_mut().set_selected_control_point(None);
 
                 // ✅ 선택 영역 확정 후, 캔버스 백업 초기화
                 IMAGE_BACKUP.with(|backup| *backup.borrow_mut() = None);
@@ -509,9 +528,6 @@ pub fn start() -> Result<(), JsValue> {
                 mouse_context_points.borrow_mut().clear();
 
                 redraw(&context_clone);
-
-                let num_shapes = SHAPES.with(|shapes| shapes.borrow().len());
-                info!("mouseup: number of shapes={num_shapes}"); // 값을 콘솔에 출력
             });
         })?;
     }
@@ -676,7 +692,6 @@ fn redraw(context: &CanvasRenderingContext2d) {
     let canvas = context.canvas().unwrap();
     let canvas_width = canvas.width() as f64;
     let canvas_height = canvas.height() as f64;
-    info!("redraw: canvas size=({canvas_width}, {canvas_height})"); // 값을 콘솔에 출력
 
     STATE.with(|state|{
         // 잔상 방지를 위해 전체 캔버스를 리셋
