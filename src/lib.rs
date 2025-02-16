@@ -14,8 +14,12 @@ use std::fs::OpenOptions;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-pub mod shape;
-use crate::shape::{Shape, Point2D, Pencil, Line, Svg};
+mod shapes{
+    pub mod shape;
+    pub mod rectangle;
+}
+use crate::shapes::shape::{Shape, Point2D, Pencil, Line, Svg};
+use crate::shapes::rectangle::{Rectangle};
 
 pub mod state;
 use crate::state::State;
@@ -432,6 +436,32 @@ pub fn start() -> Result<(), JsValue> {
                                             mouse_context_points.borrow_mut().push(end_point);
                                         }
                                     }
+                                    DrawingMode::Rectangle =>{
+                                        let start_point = *mouse_context_points.borrow().get(0).unwrap();
+
+                                        if let Some(ref shape) = *ghost.borrow() {
+                                            IMAGE_BACKUP.with(|backup| {
+                                                if let Some(ref image_data) = *backup.borrow() {
+                                                    context_clone.put_image_data(image_data, 0.0, 0.0).unwrap();
+                                                }
+                                            });
+                                        }
+
+                                        let end_point = Point2D::new(current_x, current_y);
+                                        let width = end_point.x - start_point.x;
+                                        let height = end_point.y - start_point.y;
+                                        let rectangle = Rectangle::new(state.borrow().color().to_string(), state.borrow().line_width(), start_point, width, height);
+                                        rectangle.draw_xor(&context_clone, state.borrow().scale());
+                                        *ghost.borrow_mut() = Some(Box::new(rectangle));
+
+                                        if mouse_context_points.borrow().len() == 1{
+                                            mouse_context_points.borrow_mut().push(end_point);
+                                        }
+                                        else{
+                                            mouse_context_points.borrow_mut().remove(1);
+                                            mouse_context_points.borrow_mut().push(end_point);
+                                        }
+                                    }
                                     _ => info!("not supported drawing mode: {drawing_mode}"), // 값을 콘솔에 출력
                                 }
                             });
@@ -520,6 +550,17 @@ pub fn start() -> Result<(), JsValue> {
                             let line = Line::new(state.borrow().color().to_string(), state.borrow().line_width(), *start, *end);
                             SHAPES.with(|shapes| {
                                 shapes.borrow_mut().push(Box::new(line));
+                            });
+                        }
+                        DrawingMode::Rectangle =>{
+                            let mouse_context_points_ref = mouse_context_points.borrow();
+                            let start = mouse_context_points_ref.get(0).unwrap();
+                            let end = mouse_context_points_ref.get(mouse_context_points.borrow().len() - 1).unwrap();
+                            let width = end.x - start.x;
+                            let height = end.y - start.y;
+                            let rectangle = Rectangle::new(state.borrow().color().to_string(), state.borrow().line_width(), *start, width, height);
+                            SHAPES.with(|shapes| {
+                                shapes.borrow_mut().push(Box::new(rectangle));
                             });
                         }
                     }
@@ -721,16 +762,19 @@ fn setup_mode_buttons() {
     let selection_button = document.get_element_by_id("selection-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
     let pencil_button = document.get_element_by_id("pencil-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
     let line_button = document.get_element_by_id("line-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+    let rectangle_button = document.get_element_by_id("rectangle-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
 
     // Function to update active button UI
     let update_ui = move |active_button: &HtmlElement| {
         let selection_button = selection_button.clone();
         let pencil_button = pencil_button.clone();
         let line_button = line_button.clone();
+        let rectangle_button = rectangle_button.clone();
 
         selection_button.set_class_name("");
         pencil_button.set_class_name("");
         line_button.set_class_name("");
+        rectangle_button.set_class_name("");
 
         active_button.set_class_name("active");
     };
@@ -773,6 +817,20 @@ fn setup_mode_buttons() {
                 state.borrow_mut().set_drawing_mode(&DrawingMode::Line);
             });
             update_ui_clone(&line_button_clone);
+        });
+    }
+
+    // Rectangle mode Handler
+    {
+        let rectangle_button = document.get_element_by_id("rectangle-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+        let rectangle_button_clone = rectangle_button.clone();
+        let update_ui_clone = update_ui.clone();
+        add_click_listener(&rectangle_button, move || {
+            STATE.with(|state| {
+                state.borrow_mut().set_action_mode(&ActionMode::Drawing);
+                state.borrow_mut().set_drawing_mode(&DrawingMode::Rectangle);
+            });
+            update_ui_clone(&rectangle_button_clone);
         });
     }
 }

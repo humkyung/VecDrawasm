@@ -1,7 +1,7 @@
 use std::{mem::offset_of, str, fmt};
 use log::info;
 
-use crate::shape::{Point2D, Shape};
+use crate::shapes::shape::{Point2D, Shape};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ActionMode {
@@ -22,6 +22,7 @@ impl fmt::Display for ActionMode {
 pub enum DrawingMode {
     Pencil,
     Line,
+    Rectangle
 }
 
 impl fmt::Display for DrawingMode {
@@ -29,6 +30,7 @@ impl fmt::Display for DrawingMode {
         match self {
             DrawingMode::Pencil => write!(f, "Pencil Mode"),
             DrawingMode::Line => write!(f, "Line Mode"),
+            DrawingMode::Rectangle => write!(f, "Rectangle Mode"),
         }
     }
 }

@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::f64::MAX;
 use std::iter::Scan;
 use std::str;
 use std::task::Context;
+use std::thread::panicking;
 use log::info;
 use wasm_bindgen::convert::FromWasmAbi;
 use wasm_bindgen::prelude::*;
@@ -35,6 +37,8 @@ impl Point2D{
 pub trait Shape{
     fn color(&self) -> &str;
     fn line_width(&self) -> f64 { 2.0 }
+    fn max_point(&self) -> Point2D;
+    fn min_point(&self) -> Point2D;
     fn is_hit(&self, x: f64, y: f64) -> bool;
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32;
     fn is_selected(&self) -> bool;
@@ -71,6 +75,18 @@ impl Shape for Pencil{
 
     fn line_width(&self) -> f64 {
         self.line_width
+    }
+
+    fn max_point(&self) -> Point2D{
+        self.points.iter().fold(Point2D::new(f64::MIN, f64::MIN), |acc, point| 
+            Point2D::new(acc.x.max(point.x), acc.y.max(point.y))
+        )
+    }
+
+    fn min_point(&self) -> Point2D{
+        self.points.iter().fold(Point2D::new(f64::MAX, f64::MAX), |acc, point| 
+            Point2D::new(acc.x.min(point.x), acc.y.min(point.y))
+        )
     }
 
     fn is_hit(&self, x: f64, y: f64) -> bool {
@@ -126,6 +142,7 @@ impl Shape for Pencil{
     }
 
     fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64){
+        context.save();
         if self.hovered{
             context.set_stroke_style(&JsValue::from_str("#ff0000"));
         }
@@ -143,6 +160,7 @@ impl Shape for Pencil{
             }
             context.stroke();
         }
+        context.restore();
 
         if self.selected{ self.draw_control_points(context, scale);}
     }   
@@ -167,14 +185,37 @@ impl Shape for Pencil{
     }
 
     fn draw_control_points(&self, context: &CanvasRenderingContext2d, scale: f64) {
-        context.set_fill_style(&"#FF0000".into()); // Red control points
-
         let adjusted_width = 1.0 / scale * 5.0;
+
+        context.save();
+        context.set_fill_style(&"#FF0000".into()); // Red control points
         for point in self.points.clone(){
-            context.begin_path();
-            context.rect(point.x - adjusted_width, point.y - adjusted_width, adjusted_width * 2.0, adjusted_width * 2.0);
-            context.fill();
+            context.fill_rect(point.x - adjusted_width, point.y - adjusted_width, adjusted_width * 2.0, adjusted_width * 2.0);
         }
+
+        context.set_fill_style(&"#0000FF".into()); // Red control points
+        context.set_stroke_style(&"0000FF".into());
+        let adjusted_width = 0.5 / scale;
+        context.set_line_width(adjusted_width);
+
+        // ✅ Set dash pattern: [Dash length, Gap length]
+        let dash_pattern = js_sys::Array::new();
+        dash_pattern.push(&(adjusted_width * 3.0).into()); // 2px dash
+        dash_pattern.push(&(adjusted_width * 3.0).into());  // 2px gap
+        context.set_line_dash(&dash_pattern).unwrap();
+
+        let min_pt = self.min_point();
+        let max_pt = self.max_point();
+        context.begin_path();
+        context.move_to(min_pt.x, min_pt.y);
+        context.line_to(max_pt.x, min_pt.y);
+        context.line_to(max_pt.x, max_pt.y);
+        context.line_to(min_pt.x, max_pt.y);
+        context.line_to(min_pt.x, min_pt.y);
+        context.close_path();
+        context.stroke();
+
+        context.restore();
     }
 }
 
@@ -218,6 +259,14 @@ impl Shape for Line{
         let dx = px - x;
         let dy = py - y;
         dx * dx + dy * dy < 25.0
+    }
+
+    fn max_point(&self) -> Point2D{
+        Point2D::new(self.start.x.max(self.end.x), self.start.y.max(self.end.y))
+    }
+
+    fn min_point(&self) -> Point2D{
+        Point2D::new(self.start.x.min(self.end.x), self.start.y.min(self.end.y))
     }
 
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
@@ -1004,6 +1053,14 @@ impl Shape for Svg{
 
     fn is_hit(&self, x: f64, y: f64) -> bool {
         false        
+    }
+
+    fn max_point(&self) -> Point2D{
+        Point2D::new(f64::MAX, f64::MAX)
+    }
+
+    fn min_point(&self) -> Point2D{
+        Point2D::new(f64::MIN, f64::MIN)
     }
 
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
