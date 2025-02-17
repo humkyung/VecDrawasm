@@ -15,12 +15,15 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 mod shapes{
+    pub mod geometry;
     pub mod shape;
+    pub mod line;
     pub mod rectangle;
     pub mod ellipse;
 }
-use crate::shapes::shape::{Shape, Point2D, Pencil, Line, Svg};
-use crate::shapes::{rectangle::Rectangle, ellipse::Ellipse};
+use crate::shapes::geometry::{Point2D, Vector2D};
+use crate::shapes::shape::{Shape, Pencil, Svg};
+use crate::shapes::{line::Line, rectangle::Rectangle, ellipse::Ellipse};
 
 pub mod state;
 use crate::state::State;
@@ -326,7 +329,6 @@ pub fn start() -> Result<(), JsValue> {
                                 let control_point_index = shape.get_control_point(current_x, current_y, state.borrow().scale());
                                 if control_point_index != -1 {
                                     state.borrow_mut().set_selected_control_point(Some((index as i32, control_point_index)));
-                                    info!("selected shape : {index}, selected control point : {control_point_index}");
                                     break;
                                 }
                             }
@@ -696,8 +698,24 @@ pub fn start() -> Result<(), JsValue> {
     Ok(())
 }
 
-pub fn setup_keyboard_shortcuts() {
-    let window = window().unwrap();
+// keyboard event
+pub fn setup_keyboard_shortcuts() -> Result<(), JsValue> {
+    // 브라우저의 Window 및 Document 객체 가져오기
+    let window = web_sys::window().expect("No global window exists");
+    let document = window.document().expect("Should have a document on window");
+
+    // HTML5 캔버스 가져오기
+    let canvas = document
+        .get_element_by_id("drawing-canvas")
+        .expect("Canvas element not found")
+        .dyn_into::<HtmlCanvasElement>()?;
+
+    // 캔버스 2D 렌더링 컨텍스트 가져오기
+    // ✅ Get 2D Rendering Context
+    let context = canvas
+        .get_context("2d")?
+        .ok_or("Failed to get 2D context")?
+        .dyn_into::<CanvasRenderingContext2d>()?;
 
     let closure = Closure::wrap(Box::new(move |event: KeyboardEvent| {
         if event.ctrl_key() && event.key() == "a" {
@@ -708,10 +726,20 @@ pub fn setup_keyboard_shortcuts() {
             event.prevent_default(); // ✅ Prevent default behavior
             let _ = select_all_shapes(false);
         }
+        else if event.key() == "Delete"{
+            event.prevent_default();
+            SHAPES.with(|shapes| {
+                shapes.borrow_mut().retain(|shape| !shape.is_selected());
+            });
+
+            redraw(&context);
+        }
     }) as Box<dyn FnMut(_)>);
 
     window.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref()).unwrap();
     closure.forget();
+
+    Ok(())
 }
 
 /// Selects all shapes in `SHAPES`
@@ -732,7 +760,6 @@ fn select_all_shapes(selected: bool) -> Result<(), JsValue> {
         .get_context("2d")?
         .ok_or("Failed to get 2D context")?
         .dyn_into::<CanvasRenderingContext2d>()?;
-
 
     SHAPES.with(|shapes| {
         for shape in shapes.borrow_mut().iter_mut() {

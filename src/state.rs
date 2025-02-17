@@ -1,7 +1,8 @@
 use std::{mem::offset_of, str, fmt};
 use log::info;
 
-use crate::shapes::shape::{Point2D, Shape};
+use crate::shapes::geometry::{Point2D};
+use crate::shapes::shape::{Shape};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ActionMode {

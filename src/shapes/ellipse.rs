@@ -13,7 +13,9 @@ use web_sys::console::group;
 use web_sys::console::info;
 use web_sys::{window, CanvasRenderingContext2d};
 
-use super::shape::{Point2D, Shape};
+use super::geometry::Vector2D;
+use super::geometry::{Point2D};
+use super::shape::{Shape};
 
 #[derive(Debug, Clone)]
 pub struct Ellipse{
@@ -27,10 +29,13 @@ pub struct Ellipse{
     hovered: bool,
     color: String,
     line_width: f64,
+    axis_x: Vector2D,
+    axis_y: Vector2D
 }
 impl Ellipse{
     pub fn new(center: Point2D, rx: f64, ry: f64, rotation: f64, start_angle: f64, end_angle: f64, color: String, line_width: f64) -> Self {
-        Ellipse{center, radius_x: rx, radius_y: ry, rotation: rotation, start_angle: start_angle, end_angle: end_angle, selected: false, hovered: false, color, line_width}
+        Ellipse{center, radius_x: rx, radius_y: ry, rotation: rotation, start_angle: start_angle, end_angle: end_angle, selected: false, hovered: false, color, line_width
+            , axis_x: Vector2D::AXIS_X, axis_y: Vector2D::AXIS_Y}
     }
 
     fn control_points(&self) -> Vec<Point2D>{

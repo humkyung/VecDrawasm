@@ -161,6 +161,12 @@
         height: 100%;
         border: none;
     }
+
+    /* 🖱 Cursor styles */
+    .cursor-default { cursor: default; }
+    .cursor-pointer { cursor: pointer; }
+    .cursor-crosshair { cursor: crosshair; }
+    .cursor-move { cursor: move; }
   </style>
 </head>
 
@@ -174,7 +180,9 @@
     <div class="main-container">
       <div class="controls">
         <div class="toolbar">
-          <button id="selection-mode">🔲</button>
+          <button id="selection-mode">
+            <img src="asset/mouse-select.svg" alt="Select" width="16" height="16">
+          </button>
           <button id="eraser-mode">🧽</button>
           <button id="pencil-mode">✏️</button>
           <button id="line-mode">📏</button>
