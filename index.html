@@ -10,6 +10,22 @@
       display: flex;
       height: 100vh;
       background-color: #f0f0f0;
+      overflow: hidden; /* Prevent scrollbars */
+    }
+
+    /* 🎨 Floating Toolbar */
+    #toolbar {
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(255, 255, 255, 0.9);
+        padding: 10px;
+        border-radius: 10px;
+        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+        display: flex;
+        gap: 8px;
+        z-index: 10;
     }
 
     /* 🎯 왼쪽 라이브러리 패널 */
@@ -83,6 +99,8 @@
     }
 
     .controls {
+      position: absolute;
+      top: 0;
       display: flex;
       gap: 10px;
       background: rgba(255, 255, 255, 0.8);
@@ -121,7 +139,7 @@
     .main-container {
       flex-grow: 1;
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
       align-items: center;
       justify-content: center;
       position: relative;
@@ -129,6 +147,7 @@
       padding-top: 0px; /* 🎯 컨트롤 패널과 캔버스가 겹치지 않도록 조정 */
     }
 
+    /* 🎨 Canvas Styling */
     .canvas-container {
       display: flex;
       flex-direction: column;
@@ -136,8 +155,11 @@
     }
 
     canvas {
-      border: 1px solid black;
-      display: block;
+        display: block;
+        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+        width: 100%;
+        height: 100%;
+        border: none;
     }
   </style>
 </head>
@@ -149,34 +171,71 @@
         <p>SVG 파일을 여기에 드래그하세요</p>
     </div>
 
-    <!-- 🎨 중앙 캔버스 컨테이너 -->
     <div class="main-container">
       <div class="controls">
         <div class="toolbar">
           <button id="selection-mode">🔲</button>
+          <button id="eraser-mode">🧽</button>
           <button id="pencil-mode">✏️</button>
           <button id="line-mode">📏</button>
           <button id="rectangle-mode">🟥</button>
-        </div>
+          <button id="ellipse-mode">⭕</button>
 
-        <input type="color" id="color-picker" value="#0000FF">
-        <input type="range" id="line-width" min="1" max="10" value="2">
-        <button id="clear-btn">지우기</button>
-        <button id="save-btn" class="save-btn">저장</button>
+          <input type="color" id="color-picker" value="#0000FF">
+          <input type="range" id="line-width" min="1" max="10" value="2">
+          <button id="clear-btn">지우기</button>
+          <button id="save-btn" class="save-btn">저장</button>
+        </div>
       </div>
 
-        <div class="canvas-container">
-            <!-- 캔버스 -->
-            <canvas id="drawing-canvas" width="1600" height="900"></canvas>
-        </div>
+      <div class="canvas-container">
+        <!-- 캔버스 -->
+        <canvas id="drawing-canvas" width="1600" height="900"></canvas>
+      </div>
     </div>
+
+    <!--
+    <div id="toolbar">
+      <button id="selection-mode">🔲</button>
+      <button id="eraser-mode">🧽</button>
+      <button id="pencil-mode">✏️</button>
+      <button id="line-mode">📏</button>
+      <button id="rectangle-mode">🟥</button>
+      <button id="ellipse-mode">⭕</button>
+
+      <input type="color" id="color-picker" value="#0000FF">
+      <input type="range" id="line-width" min="1" max="10" value="2">
+      <button id="clear-btn">지우기</button>
+      <button id="save-btn" class="save-btn">저장</button>
+    </div>
+
+    <div class="canvas-container">
+        <canvas id="drawing-canvas"></canvas>
+    </div>
+    -->
 
     <script type="module">
         import init, {render_svg_to_canvas} from './pkg/vector_drawing_webapp.js';
-        init().then(() => {
-            console.log("WASM loaded.");
-        });
 
+        async function start() {
+          await init();
+          console.log("✅ WebAssembly Initialized");
+
+          // ✅ Resize Canvas to Fit Screen
+          function resizeCanvas() {
+              const canvas = document.getElementById("drawing-canvas");
+              const toolbar = document.getElementById("toobar");
+
+              canvas.width = window.innerWidth - 300;
+              canvas.height = window.innerHeight - 50;
+          }
+
+          window.addEventListener("resize", resizeCanvas);
+        }
+
+        start();
+
+      /*
         document.addEventListener("DOMContentLoaded", function () {
           const libraryPanel = document.getElementById("library-panel");
           let selectedItem = null;
@@ -254,6 +313,7 @@
               }
           });
         });
+        */
     </script>    
 </body>
 </html>

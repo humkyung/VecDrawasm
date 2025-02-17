@@ -17,9 +17,10 @@ use std::cell::RefCell;
 mod shapes{
     pub mod shape;
     pub mod rectangle;
+    pub mod ellipse;
 }
 use crate::shapes::shape::{Shape, Point2D, Pencil, Line, Svg};
-use crate::shapes::rectangle::{Rectangle};
+use crate::shapes::{rectangle::Rectangle, ellipse::Ellipse};
 
 pub mod state;
 use crate::state::State;
@@ -55,10 +56,14 @@ pub fn start() -> Result<(), JsValue> {
         .expect("Canvas element not found")
         .dyn_into::<HtmlCanvasElement>()?;
 
+    // ✅ Use `willReadFrequently: true`
+    let context_options = js_sys::Object::new();
+    js_sys::Reflect::set(&context_options, &"willReadFrequently".into(), &true.into())?;
+
     // 캔버스 2D 렌더링 컨텍스트 가져오기
     let context = canvas
         .get_context("2d")?
-        .unwrap()
+        .ok_or("Failed to get 2D context")?
         .dyn_into::<CanvasRenderingContext2d>()?;
 
     let color_picker: HtmlInputElement = document
@@ -73,7 +78,6 @@ pub fn start() -> Result<(), JsValue> {
 
     // ✅ 모드 선택 UI
     setup_mode_buttons();
-
     setup_keyboard_shortcuts();
 
     // 초기 캔버스 상태
@@ -161,7 +165,7 @@ pub fn start() -> Result<(), JsValue> {
                         let rect = canvas_clone.get_bounding_client_rect();
                         let mouse_x = event.client_x() as f64 - rect.left();
                         let mouse_y = event.client_y() as f64 - rect.top();
-                        let (drop_x, drop_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (0.0, 0.0));
+                        let (drop_x, drop_y) = calculate_canvas_coordinates((event.client_x() as f64, event.client_y() as f64), (0.0, 0.0));
                         render_svg_to_canvas(&context_clone, &canvas_clone, &svg_data, drop_x, drop_y);
                     } else {
                         let promise: Result<Promise, wasm_bindgen::JsValue> = data_transfer.get_files();
@@ -241,13 +245,13 @@ pub fn start() -> Result<(), JsValue> {
 
     // 마우스 휠 이벤트 (줌)
     {
-        let canvas_size = (canvas.width(), canvas.height());
         let context_clone = Rc::new(context.clone());
-
-        let client_rect = canvas.get_bounding_client_rect();
+        let canvas_clone= canvas.clone();
 
         add_wheelevent_listener(&canvas, "wheel", move |event: WheelEvent| {
             event.prevent_default();
+
+            let client_rect = canvas_clone.get_bounding_client_rect();
 
             STATE.with(|state| {
                 let scale = state.borrow().scale();
@@ -278,11 +282,15 @@ pub fn start() -> Result<(), JsValue> {
     // 마우스 다운 이벤트 (팬 시작)
     { 
         let last_mouse_pos = Rc::clone(&last_mouse_pos);
-        let client_rect = canvas.get_bounding_client_rect();
+        let canvas_clone = canvas.clone();
 
         let mouse_context_points= Rc::clone(&mouse_context_points);
 
         add_event_listener(&canvas, "mousedown", move |event: MouseEvent| {
+            event.prevent_default();
+
+            let client_rect = canvas_clone.get_bounding_client_rect();
+
             // 마우스 위치 저장
             let mouse_x = event.client_x() as f64 - client_rect.left();
             let mouse_y = event.client_y() as f64 - client_rect.top();
@@ -343,20 +351,20 @@ pub fn start() -> Result<(), JsValue> {
 
     // 마우스 이동 이벤트
     {
-        let canvas= Rc::new(canvas.clone());
+        let canvas_clone = canvas.clone();
         let context_clone = Rc::new(context.clone());
-
-        let canvas_size = (canvas.width(), canvas.height());
-        let client_rect = canvas.get_bounding_client_rect();
 
         let last_mouse_pos = Rc::clone(&last_mouse_pos);
 
         let mouse_context_points= Rc::clone(&mouse_context_points);
 
         let animation_requested_clone = Rc::clone(&animation_requested);
-        let window_clone = Rc::new(window.clone());
 
         add_event_listener(&canvas, "mousemove", move |event: MouseEvent| {
+            event.prevent_default();
+
+            let client_rect = canvas_clone.get_bounding_client_rect();
+
             let (last_x, last_y) = *last_mouse_pos.borrow();
 
             let window = web_sys::window().unwrap();
@@ -394,6 +402,15 @@ pub fn start() -> Result<(), JsValue> {
 
                                 info!("panning dx={dx},dy={dy}"); // 값을 콘솔에 출력
                             }
+                        }else if state.borrow().action_mode() == &state::ActionMode::Eraser{
+                            let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
+
+                            SHAPES.with(|shapes| {
+                                let mut shapes = shapes.borrow_mut();
+                                shapes.retain(|shape| !shape.is_hit(current_x, current_y)); // ✅ Remove nearby shapes
+                            });
+
+                            redraw(&context_clone);
                         }else if state.borrow().action_mode() == &state::ActionMode::Drawing{
                             let (last_x, last_y) = calculate_canvas_coordinates((last_x, last_y), (scroll_x, scroll_y));
                             let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
@@ -453,6 +470,33 @@ pub fn start() -> Result<(), JsValue> {
                                         let rectangle = Rectangle::new(state.borrow().color().to_string(), state.borrow().line_width(), start_point, width, height);
                                         rectangle.draw_xor(&context_clone, state.borrow().scale());
                                         *ghost.borrow_mut() = Some(Box::new(rectangle));
+
+                                        if mouse_context_points.borrow().len() == 1{
+                                            mouse_context_points.borrow_mut().push(end_point);
+                                        }
+                                        else{
+                                            mouse_context_points.borrow_mut().remove(1);
+                                            mouse_context_points.borrow_mut().push(end_point);
+                                        }
+                                    }
+                                    DrawingMode::Ellipse =>{
+                                        let start_point = *mouse_context_points.borrow().get(0).unwrap();
+
+                                        if let Some(ref shape) = *ghost.borrow() {
+                                            IMAGE_BACKUP.with(|backup| {
+                                                if let Some(ref image_data) = *backup.borrow() {
+                                                    context_clone.put_image_data(image_data, 0.0, 0.0).unwrap();
+                                                }
+                                            });
+                                        }
+
+                                        let end_point = Point2D::new(current_x, current_y);
+                                        let width = end_point.x - start_point.x;
+                                        let height = end_point.y - start_point.y;
+                                        let center = Point2D::new(current_x - width * 0.5, current_y - height * 0.5);
+                                        let ellipse= Ellipse::new(center, width * 0.5, height * 0.5, 0.0, 0.0, std::f64::consts::PI * 2.0, state.borrow().color().to_string(), state.borrow().line_width());
+                                        ellipse.draw_xor(&context_clone, state.borrow().scale());
+                                        *ghost.borrow_mut() = Some(Box::new(ellipse));
 
                                         if mouse_context_points.borrow().len() == 1{
                                             mouse_context_points.borrow_mut().push(end_point);
@@ -524,7 +568,9 @@ pub fn start() -> Result<(), JsValue> {
         let context_clone = Rc::new(context.clone());
         let mouse_context_points= Rc::clone(&mouse_context_points);
 
-        add_event_listener(&canvas, "mouseup", move |_event: MouseEvent| {
+        add_event_listener(&canvas, "mouseup", move |event: MouseEvent| {
+            event.prevent_default();
+
             STATE.with(|state| {
                 IS_MOUSE_PRESSED.with(|pressed| *pressed.borrow_mut() = false);
                 state.borrow_mut().set_is_panning(&false);
@@ -561,6 +607,18 @@ pub fn start() -> Result<(), JsValue> {
                             let rectangle = Rectangle::new(state.borrow().color().to_string(), state.borrow().line_width(), *start, width, height);
                             SHAPES.with(|shapes| {
                                 shapes.borrow_mut().push(Box::new(rectangle));
+                            });
+                        }
+                        DrawingMode::Ellipse =>{
+                            let mouse_context_points_ref = mouse_context_points.borrow();
+                            let start = mouse_context_points_ref.get(0).unwrap();
+                            let end = mouse_context_points_ref.get(mouse_context_points.borrow().len() - 1).unwrap();
+                            let width = end.x - start.x;
+                            let height = end.y - start.y;
+                            let center = Point2D::new((start.x + end.x) * 0.5, (start.y + end.y) * 0.5);
+                            let ellipse = Ellipse::new(center, width * 0.5, height * 0.5, 0.0, 0.0, std::f64::consts::PI * 2.0, state.borrow().color().to_string(), state.borrow().line_width());
+                            SHAPES.with(|shapes| {
+                                shapes.borrow_mut().push(Box::new(ellipse));
                             });
                         }
                     }
@@ -760,21 +818,28 @@ fn setup_mode_buttons() {
     let document = window().unwrap().document().unwrap();
 
     let selection_button = document.get_element_by_id("selection-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+    let eraser_button = document.get_element_by_id("eraser-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+
     let pencil_button = document.get_element_by_id("pencil-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
     let line_button = document.get_element_by_id("line-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
     let rectangle_button = document.get_element_by_id("rectangle-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+    let ellipse_button = document.get_element_by_id("ellipse-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
 
     // Function to update active button UI
     let update_ui = move |active_button: &HtmlElement| {
         let selection_button = selection_button.clone();
+        let eraser_button = eraser_button.clone();
         let pencil_button = pencil_button.clone();
         let line_button = line_button.clone();
         let rectangle_button = rectangle_button.clone();
 
         selection_button.set_class_name("");
+        eraser_button.set_class_name("");
+
         pencil_button.set_class_name("");
         line_button.set_class_name("");
         rectangle_button.set_class_name("");
+        ellipse_button.set_class_name("");
 
         active_button.set_class_name("active");
     };
@@ -789,6 +854,19 @@ fn setup_mode_buttons() {
                 state.borrow_mut().set_action_mode(&ActionMode::Selection);
             });
             update_ui_clone(&selection_button_clone);
+        });
+    }
+
+    // Eraser mode Handler
+    {
+        let eraser_button = document.get_element_by_id("eraser-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+        let eraser_button_clone = eraser_button.clone();
+        let update_ui_clone = update_ui.clone();
+        add_click_listener(&eraser_button, move || {
+            STATE.with(|state| {
+                state.borrow_mut().set_action_mode(&ActionMode::Eraser);
+            });
+            update_ui_clone(&eraser_button_clone);
         });
     }
 
@@ -833,6 +911,20 @@ fn setup_mode_buttons() {
             update_ui_clone(&rectangle_button_clone);
         });
     }
+    
+    // Ellipse mode Handler
+    {
+        let ellipse_button = document.get_element_by_id("ellipse-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+        let ellipse_button_clone = ellipse_button.clone();
+        let update_ui_clone = update_ui.clone();
+        add_click_listener(&ellipse_button, move || {
+            STATE.with(|state| {
+                state.borrow_mut().set_action_mode(&ActionMode::Drawing);
+                state.borrow_mut().set_drawing_mode(&DrawingMode::Ellipse);
+            });
+            update_ui_clone(&ellipse_button_clone);
+        });
+    }
 }
 
 fn add_click_listener(element: &web_sys::Element, callback: impl Fn() + 'static) {
@@ -850,8 +942,10 @@ fn add_click_listener(element: &web_sys::Element, callback: impl Fn() + 'static)
 */
 fn calculate_canvas_coordinates(mouse_pos: (f64, f64), scroll: (f64, f64)) -> (f64, f64) {
     STATE.with(|state| {
-        let x = (mouse_pos.0 - state.borrow().offset().x) / state.borrow().scale() + scroll.0;
-        let y = (mouse_pos.1 - state.borrow().offset().y) / state.borrow().scale() + scroll.1;
+        let state = state.borrow();
+
+        let x = (mouse_pos.0 - state.offset().x) / state.scale() + scroll.0;
+        let y = (mouse_pos.1 - state.offset().y) / state.scale() + scroll.1;
         return (x, y);
     })
 }

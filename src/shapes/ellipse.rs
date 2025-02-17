@@ -16,36 +16,39 @@ use web_sys::{window, CanvasRenderingContext2d};
 use super::shape::{Point2D, Shape};
 
 #[derive(Debug, Clone)]
-pub struct Rectangle{
+pub struct Ellipse{
+    center: Point2D,
+    radius_x: f64,
+    radius_y: f64,
+    rotation: f64,
+    start_angle: f64,
+    end_angle: f64,
     selected: bool,
     hovered: bool,
     color: String,
     line_width: f64,
-    start: Point2D,
-    width: f64,
-    height: f64
 }
-impl Rectangle{
-    pub fn new(color: String, line_width: f64, start: Point2D, w: f64, h: f64) -> Self {
-        Rectangle{selected: false, hovered: false, color, line_width, start: start, width: w, height: h}
+impl Ellipse{
+    pub fn new(center: Point2D, rx: f64, ry: f64, rotation: f64, start_angle: f64, end_angle: f64, color: String, line_width: f64) -> Self {
+        Ellipse{center, radius_x: rx, radius_y: ry, rotation: rotation, start_angle: start_angle, end_angle: end_angle, selected: false, hovered: false, color, line_width}
     }
 
     fn control_points(&self) -> Vec<Point2D>{
         let control_pts = vec![
-            Point2D::new(self.start.x, self.start.y), 
-            Point2D::new(self.start.x, self.start.y + self.height * 0.5),
-            Point2D::new(self.start.x, self.start.y + self.height),
-            Point2D::new(self.start.x + self.width * 0.5, self.start.y + self.height),
-            Point2D::new(self.start.x + self.width, self.start.y + self.height),
-            Point2D::new(self.start.x + self.width, self.start.y + self.height * 0.5),
-            Point2D::new(self.start.x + self.width, self.start.y),
-            Point2D::new(self.start.x + self.width * 0.5, self.start.y)
+            Point2D::new(self.center.x - self.radius_x, self.center.y - self.radius_y), 
+            Point2D::new(self.center.x - self.radius_x, self.center.y),
+            Point2D::new(self.center.x - self.radius_x, self.center.y + self.radius_y),
+            Point2D::new(self.center.x, self.center.y + self.radius_y),
+            Point2D::new(self.center.x + self.radius_x, self.center.y + self.radius_y),
+            Point2D::new(self.center.x + self.radius_x, self.center.y),
+            Point2D::new(self.center.x + self.radius_x, self.center.y - self.radius_y),
+            Point2D::new(self.center.x, self.center.y - self.radius_y)
             ];
 
         control_pts
     }
 }
-impl Shape for Rectangle{
+impl Shape for Ellipse{
     fn color(&self) -> &str {
         &self.color
     }
@@ -55,18 +58,19 @@ impl Shape for Rectangle{
     }
 
     fn max_point(&self) -> Point2D{
-        Point2D::new(self.start.x + self.width, self.start.y + self.height)
+        Point2D::new(self.center.x + self.radius_x, self.center.y + self.radius_y)
     }
 
     fn min_point(&self) -> Point2D{
-        self.start.clone()
+        Point2D::new(self.center.x - self.radius_x, self.center.y - self.radius_y)
     }
 
     fn is_hit(&self, x: f64, y: f64) -> bool {
-        if x < self.start.x {return false;}
-        if x > self.start.x + self.width {return false;}
-        if y < self.start.y {return false;}
-        if y > self.start.y + self.height{return false;}
+        let min_pt = self.min_point();
+        let max_pt = self.max_point();
+
+        if x < min_pt.x || x > max_pt.x {return false;}
+        if y < min_pt.y || y > max_pt.y {return false;}
 
         true
     }
@@ -82,8 +86,8 @@ impl Shape for Rectangle{
         self.selected
     }
 
-    fn set_selected(&mut self, selected: bool){
-        self.selected = selected;
+    fn set_selected(&mut self, value: bool){
+        self.selected = value;
     }
 
     fn set_hovered(&mut self, value: bool) {
@@ -91,8 +95,8 @@ impl Shape for Rectangle{
     }
 
     fn move_by(&mut self, dx: f64, dy: f64) {
-        self.start.x += dx;
-        self.start.y += dy;
+        self.center.x += dx;
+        self.center.y += dy;
     }
 
     fn move_control_point_by(&mut self, index: i32, dx: f64, dy: f64) {
@@ -189,10 +193,10 @@ impl Shape for Rectangle{
             Point2D::new(acc.x.min(point.x), acc.y.min(point.y))
         );
 
-        self.start.x = min.x;
-        self.start.y = min.y;
-        self.width = max.x - min.x;
-        self.height = max.y - min.y;
+        self.center.x = (min.x + max.x) * 0.5;
+        self.center.y = (min.y + max.y) * 0.5;
+        self.radius_x = (max.x - min.x) * 0.5;
+        self.radius_y = (max.y - min.y) * 0.5;
     }
 
     fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64){
@@ -207,8 +211,7 @@ impl Shape for Rectangle{
         let adjusted_width = self.line_width / scale;
         context.set_line_width(adjusted_width);
         context.begin_path();
-
-        context.rect(self.start.x, self.start.y, self.width, self.height);
+        context.ellipse(self.center.x, self.center.y, self.radius_x, self.radius_y, self.rotation, self.start_angle, self.end_angle);
         context.stroke();
         
         context.restore();
@@ -222,8 +225,7 @@ impl Shape for Rectangle{
         context.set_global_composite_operation("xor").unwrap();
 
         context.begin_path();
-        context.rect(self.start.x, self.start.y, self.width, self.height);
-
+        context.ellipse(self.center.x, self.center.y, self.radius_x, self.radius_y, self.rotation, self.start_angle, self.end_angle);
         context.set_stroke_style(&JsValue::from_str(&self.color));
         let adjusted_width = self.line_width / scale;
         context.set_line_width(adjusted_width);

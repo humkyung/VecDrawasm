@@ -6,6 +6,7 @@ use crate::shapes::shape::{Point2D, Shape};
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ActionMode {
     Selection,
+    Eraser,
     Drawing,
 }
 
@@ -13,6 +14,7 @@ impl fmt::Display for ActionMode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ActionMode::Selection => write!(f, "Selection Mode"),
+            ActionMode::Eraser => write!(f, "Eraser Mode"),
             ActionMode::Drawing => write!(f, "Drawing Mode"),
         }
     }
@@ -22,7 +24,8 @@ impl fmt::Display for ActionMode {
 pub enum DrawingMode {
     Pencil,
     Line,
-    Rectangle
+    Rectangle,
+    Ellipse
 }
 
 impl fmt::Display for DrawingMode {
@@ -31,6 +34,7 @@ impl fmt::Display for DrawingMode {
             DrawingMode::Pencil => write!(f, "Pencil Mode"),
             DrawingMode::Line => write!(f, "Line Mode"),
             DrawingMode::Rectangle => write!(f, "Rectangle Mode"),
+            DrawingMode::Ellipse => write!(f, "Ellipse Mode"),
         }
     }
 }
