@@ -1,3 +1,5 @@
+use std::ops::{self, Add, AddAssign, Mul};
+
 #[derive(Debug, Clone, Copy)]
 pub struct Point2D{
     pub x: f64,
@@ -14,6 +16,25 @@ impl Point2D{
 
     pub fn set_y(&mut self, value: f64){
         self.y = value;
+    }
+}
+impl Add<Point2D> for Point2D{
+    type Output = Self;
+
+    fn add(self, other: Point2D) -> Self{
+        Self{x: self.x + other.x, y: self.y + other.y}
+    }
+}
+impl AddAssign<Point2D> for Point2D{
+    fn add_assign(&mut self, rhs: Point2D) {
+        self.x += rhs.x;
+        self.y += rhs.y;
+    }
+}
+impl AddAssign<Vector2D> for Point2D{
+    fn add_assign(&mut self, rhs: Vector2D) {
+        self.x += rhs.x;
+        self.y += rhs.y;
     }
 }
 
@@ -78,5 +99,13 @@ impl Vector2D{
         let y = sin * self.x + cos * self.y;
         self.x = x;
         self.y = y;
+    }
+}
+
+impl Mul<f64> for Vector2D{
+    type Output = Self;
+
+    fn mul(self, other: f64) -> Self{
+        Self{x: self.x * other, y: self.y * other}
     }
 }

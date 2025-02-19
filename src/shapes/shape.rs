@@ -22,7 +22,7 @@ pub trait Shape{
     fn line_width(&self) -> f64 { 2.0 }
     fn max_point(&self) -> Point2D;
     fn min_point(&self) -> Point2D;
-    fn is_hit(&self, x: f64, y: f64) -> bool;
+    fn is_hit(&self, x: f64, y: f64, scale: f64) -> bool;
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32;
     fn is_selected(&self) -> bool;
     fn set_selected(&mut self, selected: bool);
@@ -72,11 +72,13 @@ impl Shape for Pencil{
         )
     }
 
-    fn is_hit(&self, x: f64, y: f64) -> bool {
+    fn is_hit(&self, x: f64, y: f64, scale: f64) -> bool {
+        let adjusted_width = (5.0 / scale).powf(2.0);
+
         for point in self.points.iter() {
             let dx = x - point.x;
             let dy = y - point.y;
-            if dx * dx + dy * dy < 25.0 {
+            if dx * dx + dy * dy < adjusted_width {
                 return true;
             }
         }
@@ -84,7 +86,7 @@ impl Shape for Pencil{
     }
 
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
-        let adjusted_width = 1.0 / scale * 5.0;
+        let adjusted_width = (5.0 / scale).powf(2.0);
 
         for (index, point) in self.points.iter().enumerate() {
             let dx = x - point.x;
@@ -891,7 +893,7 @@ impl Shape for Svg{
         2.0
     }
 
-    fn is_hit(&self, x: f64, y: f64) -> bool {
+    fn is_hit(&self, x: f64, y: f64, scale: f64) -> bool {
         false        
     }
 

@@ -310,7 +310,7 @@ pub fn start() -> Result<(), JsValue> {
                 }else if state.borrow().action_mode() == &state::ActionMode::Selection{
                     let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
 
-                    let unders = get_shapes_under_mouse(current_x, current_y);
+                    let unders = get_shapes_under_mouse(current_x, current_y, state.borrow().scale());
                     let selected = get_selected_shapes();
                     SHAPES.with(|shapes| {
                         let selected_indices: Vec<u32> = unders.clone(); // ✅ Store indices first
@@ -377,6 +377,8 @@ pub fn start() -> Result<(), JsValue> {
             let mouse_y = event.client_y() as f64 - client_rect.top();
 
             STATE.with(|state| {
+                canvas_clone.set_class_name("cursor-default");
+
                 IS_MOUSE_PRESSED.with(|pressed|{
                     if *pressed.borrow() {
                         if state.borrow().is_panning() {
@@ -409,7 +411,7 @@ pub fn start() -> Result<(), JsValue> {
 
                             SHAPES.with(|shapes| {
                                 let mut shapes = shapes.borrow_mut();
-                                shapes.retain(|shape| !shape.is_hit(current_x, current_y)); // ✅ Remove nearby shapes
+                                shapes.retain(|shape| !shape.is_hit(current_x, current_y, state.borrow().scale())); // ✅ Remove nearby shapes
                             });
 
                             redraw(&context_clone);
@@ -548,7 +550,13 @@ pub fn start() -> Result<(), JsValue> {
                             let mut shapes = shapes.borrow_mut(); // 직접 mutable reference 가져오기
 
                             for shape in shapes.iter_mut() {
-                                if shape.is_hit(current_x, current_y) {
+                                if shape.is_selected(){
+                                    let index = shape.get_control_point(current_x, current_y, state.borrow().scale());
+                                    if index != -1{
+                                        canvas_clone.set_class_name("cursor-crosshair");
+                                    }
+                                }
+                                else if shape.is_hit(current_x, current_y, state.borrow().scale()) {
                                     shape.set_hovered(true);
                                 } else {
                                     shape.set_hovered(false);
@@ -776,14 +784,14 @@ fn select_all_shapes(selected: bool) -> Result<(), JsValue> {
 /*
     마우스 커서 아래에 있는 Shape의 인덱스를 리턴한다.
 */
-fn get_shapes_under_mouse(x: f64, y: f64) -> Vec<u32>{
+fn get_shapes_under_mouse(x: f64, y: f64, scale: f64) -> Vec<u32>{
     SHAPES.with(|shapes| {
         shapes
             .borrow()
             .iter()
             .enumerate()
             .filter_map(|(index, shape)| {
-                if shape.is_hit(x, y) {
+                if shape.is_hit(x, y, scale) {
                     Some(index as u32)
                 } else {
                     None

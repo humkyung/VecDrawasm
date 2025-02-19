@@ -70,7 +70,10 @@ impl Shape for Ellipse{
         Point2D::new(self.center.x - self.radius_x, self.center.y - self.radius_y)
     }
 
-    fn is_hit(&self, x: f64, y: f64) -> bool {
+    fn is_hit(&self, x: f64, y: f64, scale: f64) -> bool {
+        let index = self.get_control_point(x, y, scale);
+        if index != -1{return true;}
+
         let min_pt = self.min_point();
         let max_pt = self.max_point();
 

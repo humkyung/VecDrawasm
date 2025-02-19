@@ -41,7 +41,7 @@ impl Shape for Line{
         self.line_width
     }
 
-    fn is_hit(&self, x: f64, y: f64) -> bool {
+    fn is_hit(&self, x: f64, y: f64, scale: f64) -> bool {
         let dx = self.end.x - self.start.x;
         let dy = self.end.y - self.start.y;
         let d = dx * dx + dy * dy;
