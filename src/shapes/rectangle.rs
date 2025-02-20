@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::f64::MAX;
@@ -34,7 +35,7 @@ impl Rectangle{
             center: Point2D::new(start.x + w * 0.5, start.y + h * 0.5), 
             width: w, 
             height: h, 
-            rotation: 1.0}
+            rotation: 0.0}
     }
 
     fn control_points(&self) -> Vec<Point2D>{
@@ -47,19 +48,10 @@ impl Rectangle{
             Point2D::new(self.center.x + self.width * 0.5, self.center.y),
             Point2D::new(self.center.x + self.width * 0.5, self.center.y - self.height * 0.5),
             Point2D::new(self.center.x, self.center.y - self.height * 0.5),
+            Point2D::new(self.center.x, self.center.y),
             Point2D::new(self.center.x, self.center.y - self.height * 0.5 - 30.0)
             ];
         
-        /*
-        let center = Point2D::new(self.start.x + self.width * 0.5, self.start.y + self.height * 0.5);
-
-        for pt in &mut control_pts{
-            let mut dir = Vector2D::from_points(center, *pt);
-            dir.rotate_by(self.rotation);
-            pt.x = center.x + dir.x;
-            pt.y = center.y + dir.y;
-        }
-        */
         control_pts
     }
 
@@ -154,6 +146,10 @@ impl Shape for Rectangle{
         }
 
         if index == 8{
+            self.center.x += dx;
+            self.center.y += dy;
+        }
+        else if index == 9{
             if let Some(pt) = control_pts.get_mut(index as usize) {
                 let mut clone = pt.clone();
                 clone.x += dx;
@@ -233,8 +229,6 @@ impl Shape for Rectangle{
         if self.selected{ self.draw_control_points(context, scale);}
 
         context.restore();
-
-        //if self.selected{ self.draw_control_points(context, scale);}
     }   
 
     fn draw_xor(&self, context: &CanvasRenderingContext2d, scale: f64){
@@ -275,20 +269,23 @@ impl Shape for Rectangle{
         dash_pattern.push(&(adjusted_width * 3.0).into());  // gap
         context.set_line_dash(&dash_pattern).unwrap();
 
-        let min_pt = self.min_point();
-        let max_pt = self.max_point();
         context.begin_path();
         context.rect(self.center.x - self.width * 0.5, self.center.y - self.height * 0.5, self.width, self.height);
         context.stroke();
 
-        /* 
         let adjusted_width = 5.0 / scale;
-        let rotation_pt = Point2D::new((min_pt.x + max_pt.x) * 0.5, min_pt.y - 30.0 / scale);
         context.begin_path();
-        context.arc(rotation_pt.x, rotation_pt.y, adjusted_width, 0.0, std::f64::consts::PI * 2.0).unwrap();
+        context.arc(self.center.x, self.center.y, adjusted_width, 0.0, std::f64::consts::PI * 2.0).unwrap();
         context.fill();
-        */
 
         context.restore();
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

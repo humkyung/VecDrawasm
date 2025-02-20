@@ -1,3 +1,4 @@
+use std::any::Any;
 use js_sys::Math::acosh;
 use js_sys::Promise;
 use js_sys::Uint32Array;
@@ -20,10 +21,11 @@ mod shapes{
     pub mod line;
     pub mod rectangle;
     pub mod ellipse;
+    pub mod text_box;
 }
 use crate::shapes::geometry::{Point2D, Vector2D};
 use crate::shapes::shape::{Shape, Pencil, Svg};
-use crate::shapes::{line::Line, rectangle::Rectangle, ellipse::Ellipse};
+use crate::shapes::{line::Line, rectangle::Rectangle, ellipse::Ellipse, text_box::TextBox};
 
 pub mod state;
 use crate::state::State;
@@ -335,6 +337,15 @@ pub fn start() -> Result<(), JsValue> {
                         }
                     });
                 }
+                else if state.borrow().action_mode() == &state::ActionMode::Drawing{
+                    let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
+                    if state.borrow().drawing_mode() == &state::DrawingMode::Text{
+                        GHOST.with(|ghost|{
+                            let tb = TextBox::new(Point2D::new(current_x, current_y), String::new(), 0.0, state.borrow().color().to_string());
+                            *ghost.borrow_mut() = Some(Box::new(tb));
+                        });
+                    }
+                }
 
                 // ✅ 현재 캔버스 상태 백업 (이전 선택 영역 복원용)
                 IMAGE_BACKUP.with(|backup| {
@@ -510,6 +521,9 @@ pub fn start() -> Result<(), JsValue> {
                                             mouse_context_points.borrow_mut().push(end_point);
                                         }
                                     }
+                                    DrawingMode::Text => {
+
+                                    }
                                     _ => info!("not supported drawing mode: {drawing_mode}"), // 값을 콘솔에 출력
                                 }
                             });
@@ -553,7 +567,12 @@ pub fn start() -> Result<(), JsValue> {
                                 if shape.is_selected(){
                                     let index = shape.get_control_point(current_x, current_y, state.borrow().scale());
                                     if index != -1{
-                                        canvas_clone.set_class_name("cursor-crosshair");
+                                        if index == 8{
+                                            canvas_clone.set_class_name("cursor-move");
+                                        }
+                                        else{
+                                            canvas_clone.set_class_name("cursor-pointer");//"cursor-crosshair");
+                                        }
                                     }
                                 }
                                 else if shape.is_hit(current_x, current_y, state.borrow().scale()) {
@@ -631,6 +650,18 @@ pub fn start() -> Result<(), JsValue> {
                                 shapes.borrow_mut().push(Box::new(ellipse));
                             });
                         }
+                        DrawingMode::Text =>{
+                            let mouse_context_points_ref = mouse_context_points.borrow();
+                            let start = mouse_context_points_ref.get(0).unwrap();
+                            let end = mouse_context_points_ref.get(mouse_context_points.borrow().len() - 1).unwrap();
+                            let width = end.x - start.x;
+                            let height = end.y - start.y;
+                            let center = Point2D::new((start.x + end.x) * 0.5, (start.y + end.y) * 0.5);
+                            let ellipse = Ellipse::new(center, width * 0.5, height * 0.5, 0.0, 0.0, std::f64::consts::PI * 2.0, state.borrow().color().to_string(), state.borrow().line_width());
+                            SHAPES.with(|shapes| {
+                                shapes.borrow_mut().push(Box::new(ellipse));
+                            });
+                        }
                     }
                 }
 
@@ -639,6 +670,31 @@ pub fn start() -> Result<(), JsValue> {
                 redraw(&context_clone);
             });
         })?;
+    }
+
+    // ⌨️ Keyboard Input - Capture Text
+    {
+        let context_clone = Rc::new(context.clone());
+        let closure = Closure::wrap(Box::new(move |event: KeyboardEvent| {
+            GHOST.with(|ghost| {
+                if let Some(ref mut obj) = *ghost.borrow_mut(){
+                    if obj.as_any().downcast_ref::<TextBox>().is_some(){
+                        info!("input Text Box");
+                        let tb = obj.as_any_mut().downcast_mut::<TextBox>().unwrap();
+                        let key = event.key();
+                        if key == "Backspace" {
+                            tb.content.pop(); // ✅ Remove last character
+                        } else if key.len() == 1 {
+                            tb.content.push_str(&key); // ✅ Append character
+                        }
+                        redraw(&context_clone);
+                    }
+                }
+            });
+        }) as Box<dyn FnMut(_)>);
+
+        window.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref()).unwrap();
+        closure.forget();
     }
 
     // 색상 선택 이벤트
@@ -846,6 +902,12 @@ fn redraw(context: &CanvasRenderingContext2d) {
                 shape.draw(context, state.borrow().scale());
             }
         });
+
+        GHOST.with(|ghost| {
+            if let Some(ref mut shape) = *ghost.borrow_mut(){
+                shape.draw(context, state.borrow().scale());
+            }
+        });
     });
 }
 
@@ -859,6 +921,7 @@ fn setup_mode_buttons() {
     let line_button = document.get_element_by_id("line-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
     let rectangle_button = document.get_element_by_id("rectangle-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
     let ellipse_button = document.get_element_by_id("ellipse-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+    let text_button = document.get_element_by_id("text-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
 
     // Function to update active button UI
     let update_ui = move |active_button: &HtmlElement| {
@@ -867,6 +930,7 @@ fn setup_mode_buttons() {
         let pencil_button = pencil_button.clone();
         let line_button = line_button.clone();
         let rectangle_button = rectangle_button.clone();
+        let text_button = text_button.clone();
 
         selection_button.set_class_name("");
         eraser_button.set_class_name("");
@@ -875,6 +939,7 @@ fn setup_mode_buttons() {
         line_button.set_class_name("");
         rectangle_button.set_class_name("");
         ellipse_button.set_class_name("");
+        text_button.set_class_name("");
 
         active_button.set_class_name("active");
     };
@@ -958,6 +1023,20 @@ fn setup_mode_buttons() {
                 state.borrow_mut().set_drawing_mode(&DrawingMode::Ellipse);
             });
             update_ui_clone(&ellipse_button_clone);
+        });
+    }
+
+    // Text mode Handler
+    {
+        let text_button = document.get_element_by_id("text-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+        let text_button_clone = text_button.clone();
+        let update_ui_clone = update_ui.clone();
+        add_click_listener(&text_button, move || {
+            STATE.with(|state| {
+                state.borrow_mut().set_action_mode(&ActionMode::Drawing);
+                state.borrow_mut().set_drawing_mode(&DrawingMode::Text);
+            });
+            update_ui_clone(&text_button_clone);
         });
     }
 }

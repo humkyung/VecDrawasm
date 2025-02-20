@@ -26,7 +26,8 @@ pub enum DrawingMode {
     Pencil,
     Line,
     Rectangle,
-    Ellipse
+    Ellipse,
+    Text
 }
 
 impl fmt::Display for DrawingMode {
@@ -36,6 +37,7 @@ impl fmt::Display for DrawingMode {
             DrawingMode::Line => write!(f, "Line Mode"),
             DrawingMode::Rectangle => write!(f, "Rectangle Mode"),
             DrawingMode::Ellipse => write!(f, "Ellipse Mode"),
+            DrawingMode::Text => write!(f, "Text Mode"),
         }
     }
 }

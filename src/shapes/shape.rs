@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::f64::MAX;
 use std::iter::Scan;
@@ -32,6 +33,8 @@ pub trait Shape{
     fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64);
     fn draw_xor(&self, context: &CanvasRenderingContext2d, scale: f64);
     fn draw_control_points(&self, context: &CanvasRenderingContext2d, scale: f64);
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 #[derive(Debug, Clone)]
@@ -201,6 +204,14 @@ impl Shape for Pencil{
         context.stroke();
 
         context.restore();
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -947,5 +958,13 @@ impl Shape for Svg{
     }
 
     fn draw_control_points(&self, context: &CanvasRenderingContext2d, scale: f64) {
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

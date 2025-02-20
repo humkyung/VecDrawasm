@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::f64::MAX;
 use std::iter::Scan;
@@ -157,5 +158,13 @@ impl Shape for Line{
         context.rect(self.start.x - adjusted_width, self.start.y - adjusted_width, adjusted_width * 2.0, adjusted_width * 2.0);
         context.rect(self.end.x - adjusted_width, self.end.y - adjusted_width, adjusted_width * 2.0, adjusted_width * 2.0);
         context.fill();
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
