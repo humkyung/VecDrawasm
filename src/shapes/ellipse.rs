@@ -211,7 +211,7 @@ impl Shape for Ellipse{
         let adjusted_width = self.line_width / scale;
         context.set_line_width(adjusted_width);
         context.begin_path();
-        context.ellipse(self.center.x, self.center.y, self.radius_x, self.radius_y, 0.0, self.start_angle, self.end_angle);
+        let _ = context.ellipse(self.center.x, self.center.y, self.radius_x, self.radius_y, 0.0, self.start_angle, self.end_angle);
         context.stroke();
         
         if self.selected{ self.draw_control_points(context, scale);}
@@ -225,7 +225,7 @@ impl Shape for Ellipse{
         context.set_global_composite_operation("xor").unwrap();
 
         context.begin_path();
-        context.ellipse(self.center.x, self.center.y, self.radius_x, self.radius_y, self.rotation, self.start_angle, self.end_angle);
+        let _ = context.ellipse(self.center.x, self.center.y, self.radius_x, self.radius_y, self.rotation, self.start_angle, self.end_angle);
         context.set_stroke_style(&JsValue::from_str(&self.color));
         let adjusted_width = self.line_width / scale;
         context.set_line_width(adjusted_width);

@@ -200,6 +200,7 @@
       <div class="canvas-container">
         <!-- 캔버스 -->
         <canvas id="drawing-canvas" width="1600" height="900"></canvas>
+        <textarea id="hidden-input" style="position: absolute; opacity: 0; pointer-events: none;"></textarea>
       </div>
     </div>
 
@@ -222,6 +223,14 @@
         <canvas id="drawing-canvas"></canvas>
     </div>
     -->
+    <script>
+        const hiddenInput = document.getElementById('hidden-input');
+
+        // 포커스 유지 및 입력 전달 (IME 지원)
+        window.addEventListener('click', () => {
+            hiddenInput.focus();
+        });
+    </script>
 
     <script type="module">
         import init, {render_svg_to_canvas} from './pkg/vector_drawing_webapp.js';
