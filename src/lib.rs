@@ -9,7 +9,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::DomRect;
 use web_sys::{window, Document, CanvasRenderingContext2d, HtmlCanvasElement, InputEvent, HtmlTextAreaElement, HtmlInputElement, HtmlImageElement, MouseEvent, WheelEvent, DragEvent, File, FileReader, Element, Path2d
-    , HtmlDivElement , DomParser, HtmlElement, Node, NodeList, ImageData, Blob, KeyboardEvent};
+    , HtmlDivElement , DomParser, HtmlElement, Node, NodeList, ImageData, Blob, KeyboardEvent, CompositionEvent, TextMetrics};
 use std::char::UNICODE_VERSION;
 use std::fs::OpenOptions;
 use std::rc::Rc;
@@ -38,6 +38,7 @@ thread_local! {
     static STATE: Rc<RefCell<State>> = Rc::new(RefCell::new(State::new("#0000FF".to_string(), 1.0)));
     static SHAPES: Rc<RefCell<Vec<Box<dyn Shape>>>> = Rc::new(RefCell::new(Vec::new()));
     static GHOST: Rc<RefCell<Option<Box<dyn Shape>>>> = Rc::new(RefCell::new(None));
+    static TEXTBOXMANAGER: Rc<RefCell<Option<TextBoxManager>>> = Rc::new(RefCell::new(None));
     static IMAGE_BACKUP: Rc<RefCell<Option<ImageData>>> = Rc::new(RefCell::new(None));
 }
 
@@ -80,6 +81,12 @@ pub fn start() -> Result<(), JsValue> {
         .get_element_by_id("line-width")
         .expect("Line width input not found")
         .dyn_into::<HtmlInputElement>()?;
+
+    TEXTBOXMANAGER.with(|manager|{
+        let tbm = TextBoxManager::new(document.clone(), context.clone());
+        *manager.borrow_mut() = Some(tbm);
+    });
+    //let manager = Rc::new(RefCell::new(TextBoxManager::new(document.clone(), context.clone())));
 
     // ✅ 모드 선택 UI
     setup_mode_buttons();
@@ -284,14 +291,12 @@ pub fn start() -> Result<(), JsValue> {
         })?;
     }
 
-    let manager = Rc::new(RefCell::new(TextBoxManager::new(document.clone(), context.clone())));
-
     // 마우스 다운 이벤트 (팬 시작)
     { 
         let last_mouse_pos = Rc::clone(&last_mouse_pos);
         let canvas_clone = canvas.clone();
         let mouse_context_points= Rc::clone(&mouse_context_points);
-        let mouse_manager = manager.clone();
+        //let mouse_manager = manager.clone();
 
         add_event_listener(&canvas, "mousedown", move |event: MouseEvent| {
             event.prevent_default();
@@ -342,13 +347,16 @@ pub fn start() -> Result<(), JsValue> {
                 else if state.borrow().action_mode() == &state::ActionMode::Drawing{
                     let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
                     if state.borrow().drawing_mode() == &state::DrawingMode::Text{
-                        mouse_manager.borrow_mut().on_click(event);
-                        /*
-                        GHOST.with(|ghost|{
-                            let tb = TextBox::new(Point2D::new(current_x, current_y), String::from("hello"), 0.0, state.borrow().color().to_string());
-                            *ghost.borrow_mut() = Some(Box::new(tb));
+                        TEXTBOXMANAGER.with(|tbm|{
+                            if let Some(ref mut manager) = *tbm.borrow_mut() {
+                                if !manager.is_active(){
+                                    manager.on_click(event);
+                                }else{
+                                    manager.finish_input();
+                                }
+                            }
                         });
-                        */
+                        //mouse_manager.borrow_mut().on_click(event);
                     }
                 }
 
@@ -684,9 +692,59 @@ pub fn start() -> Result<(), JsValue> {
     {
         let context_clone = Rc::new(context.clone());
 
-        let input_manager = manager.clone();
+        //let start_manager = manager.clone();
+        let composition_start_closure = Closure::wrap(Box::new(move |_event: CompositionEvent| {
+            TEXTBOXMANAGER.with(|tbm|{
+                if let Some(ref mut manager) = *tbm.borrow_mut() {
+                    manager.on_composition_start();
+                }
+            });
+            //start_manager.borrow_mut().on_composition_start();
+        }) as Box<dyn FnMut(_)>);
+
+        let textarea = document.get_element_by_id("hidden-input").unwrap();
+        textarea
+            .add_event_listener_with_callback("compositionstart", composition_start_closure.as_ref().unchecked_ref())?;
+        composition_start_closure.forget();
+
+        // IME 조합 업데이트
+        //let update_manager = manager.clone();
+        let composition_update_closure = Closure::wrap(Box::new(move |event: CompositionEvent| {
+            TEXTBOXMANAGER.with(|tbm|{
+                if let Some(ref mut manager) = *tbm.borrow_mut() {
+                    manager.on_composition_update(event);
+                }
+            });
+            //update_manager.borrow_mut().on_composition_update(event);
+        }) as Box<dyn FnMut(_)>);
+
+        textarea
+            .add_event_listener_with_callback("compositionupdate", composition_update_closure.as_ref().unchecked_ref())?;
+        composition_update_closure.forget();
+
+        // IME 조합 완료
+        //let end_manager = manager.clone();
+        let composition_end_closure = Closure::wrap(Box::new(move |event: CompositionEvent| {
+            TEXTBOXMANAGER.with(|tbm|{
+                if let Some(ref mut manager) = *tbm.borrow_mut() {
+                    manager.on_composition_end(event);
+                }
+            });
+            //end_manager.borrow_mut().on_composition_end(event);
+        }) as Box<dyn FnMut(_)>);
+
+        textarea
+            .add_event_listener_with_callback("compositionend", composition_end_closure.as_ref().unchecked_ref())?;
+        composition_end_closure.forget();
+                          
+        //let input_manager = manager.clone();
         let input_closure = Closure::wrap(Box::new(move |event: InputEvent| {
-            input_manager.borrow_mut().on_input(event);
+            TEXTBOXMANAGER.with(|tbm|{
+                if let Some(ref mut manager) = *tbm.borrow_mut() {
+                    manager.on_input(event);
+                }
+            });
+            //input_manager.borrow_mut().on_input(event);
         }) as Box<dyn FnMut(_)>);
         let textarea = document.get_element_by_id("hidden-input").unwrap();
         textarea.add_event_listener_with_callback("input", input_closure.as_ref().unchecked_ref())?;
@@ -718,9 +776,14 @@ pub fn start() -> Result<(), JsValue> {
 
    { 
         // 커서 깜박임 타이머
-        let cursor_manager = manager.clone();
+        //let cursor_manager = manager.clone();
         let closure = Closure::wrap(Box::new(move || {
-            cursor_manager.borrow_mut().toggle_cursor();
+            TEXTBOXMANAGER.with(|tbm|{
+                if let Some(ref mut manager) = *tbm.borrow_mut() {
+                    manager.toggle_cursor();
+                }
+            });
+            //cursor_manager.borrow_mut().toggle_cursor();
         }) as Box<dyn FnMut()>);
 
         window.set_interval_with_callback_and_timeout_and_arguments_0(closure.as_ref().unchecked_ref(), 500)?; // 500ms마다 깜박임
@@ -798,6 +861,8 @@ struct TextBoxManager {
     boxes: Vec<myTextBox>,
     active_index: Option<usize>,
     cursor_visible: bool,
+    is_composing: bool,
+    composition_text: String,
 }
 
 impl TextBoxManager {
@@ -808,7 +873,13 @@ impl TextBoxManager {
             boxes: Vec::new(),
             active_index: None,
             cursor_visible: true,
+            is_composing: false,
+            composition_text: String::new(),
         }
+    }
+
+    fn is_active(&self) -> bool {
+        self.active_index.is_some()
     }
 
     fn on_click(&mut self, event: MouseEvent) {
@@ -819,6 +890,7 @@ impl TextBoxManager {
         for (i, box_) in self.boxes.iter_mut().enumerate() {
             if box_.contains(x, y) {
                 self.active_index = Some(i);
+                self.focus_hidden_input();
                 self.redraw();
                 return;
             }
@@ -832,21 +904,103 @@ impl TextBoxManager {
         self.redraw();
     }
 
+    fn finish_input(&mut self) {
+        // 입력 완료 및 비활성화
+        self.active_index = None;
+        self.clear_hidden_input();
+        self.redraw();
+    }
+
+    fn on_composition_start(&mut self) {
+        self.is_composing = true;
+        self.composition_text.clear();
+    }
+
+    fn on_composition_update(&mut self, event: CompositionEvent) {
+        if let Some(index) = self.active_index {
+            let active_box = &mut self.boxes[index];
+            self.composition_text = event.data().unwrap();
+            active_box.composition_text = self.composition_text.clone();
+            self.redraw();
+        }
+    }
+
+    fn on_composition_end(&mut self, event: CompositionEvent) {
+        self.is_composing = false;
+        if let Some(index) = self.active_index {
+            let active_box = &mut self.boxes[index];
+            if let Some(data) = event.data() {
+                active_box.text.push_str(&data);
+                active_box.composition_text.clear();
+                active_box.cursor_position = active_box.text.chars().count(); // 커서를 끝으로 이동
+            }
+            self.redraw();
+        }
+        self.clear_hidden_input();
+    }
+
     fn on_input(&mut self, event: InputEvent) {
+        if self.is_composing {
+            return; // IME 조합 중에는 input 이벤트 무시
+        }
+
         if let Some(index) = self.active_index {
             let active_box = &mut self.boxes[index];
             let value = event.data().unwrap_or_default();
-            info!("input value {:?}", value);
 
-            if value == "\u{0008}" {
-                // Backspace
-                active_box.text.pop();
-            } else {
-                active_box.text.push_str(&value);
-            }
+            let cursor_pos = active_box.get_char_index_at_cursor();
+            active_box.insert_at_cursor(&value, cursor_pos);
+
+            // 텍스트의 너비 계산 및 업데이트
+            let text_clone = active_box.text.clone();
+            let text_width = {
+                let text_clone = active_box.text.clone();
+                self.get_text_width(&text_clone)
+            };
+            active_box.update_width(text_width);
+
+            active_box.cursor_position += value.chars().count();
 
             self.clear_hidden_input();
             self.redraw();
+        }
+    }
+
+    fn on_keydown(&mut self, event: KeyboardEvent) {
+        if self.is_composing {
+            return; // IME 조합 중에는 keydown 이벤트 무시
+        }
+
+        if let Some(index) = self.active_index {
+            let active_box = &mut self.boxes[index];
+            let text_clone = active_box.text.clone();
+
+            match event.key().as_str() {
+                "Backspace" => {
+                    active_box.delete_before_cursor();
+                    let text_width = self.get_text_width(&text_clone);
+                    active_box.update_width(text_width);
+                    self.redraw();
+                }
+                "Delete" => {
+                    active_box.delete_at_cursor();
+                    let text_width = self.get_text_width(&text_clone);
+                    active_box.update_width(text_width);
+                    self.redraw();
+                }
+                "Enter" => {
+                    self.finish_input();
+                }
+                "ArrowLeft" => {
+                    active_box.move_cursor_left();
+                    self.redraw();
+                }
+                "ArrowRight" => {
+                    active_box.move_cursor_right();
+                    self.redraw();
+                }
+                _ => {}
+            }
         }
     }
 
@@ -869,21 +1023,28 @@ impl TextBoxManager {
 
     fn redraw(&self) {
         //self.context.clear_rect(0.0, 0.0, 800.0, 600.0);
+        self.context.set_font("20px sans-serif");
 
         for (i, box_) in self.boxes.iter().enumerate() {
             self.context.set_fill_style(&"lightgray".into());
-            self.context.fill_rect(box_.x, box_.y, 150.0, 30.0);
+            self.context.fill_rect(box_.x, box_.y, box_.width, 30.0);
 
             self.context.set_fill_style(&"black".into());
-            self.context.set_font("20px sans-serif");
+
+            let text_to_draw = format!("{}{}", box_.text, box_.composition_text);
             self.context
-                .fill_text(&box_.text, box_.x + 5.0, box_.y + 20.0)
+                .fill_text(&text_to_draw, box_.x + 5.0, box_.y + 20.0)
                 .unwrap();
 
-            // 커서 표시
+            // 커서 및 조합 중인 글자 강조 표시
             if self.active_index == Some(i) {
-                let cursor_x = box_.x + 5.0 + (box_.text.len() as f64 * 10.0);
-                if self.cursor_visible {
+                let cursor_x = self.get_text_width(&box_.text[..box_.get_byte_index_at_cursor()]) + box_.x + 5.0;
+                if self.is_composing && !box_.composition_text.is_empty() {
+                    // 조합 중인 글자에 파란색 박스 표시
+                    let width = self.get_text_width(&box_.composition_text);
+                    self.context.set_stroke_style(&"blue".into());
+                    self.context.stroke_rect(cursor_x, box_.y + 5.0, width, 22.0);
+                }else if self.cursor_visible {
                     self.context.set_fill_style(&"blue".into());
                     self.context.fill_rect(cursor_x, box_.y + 5.0, 2.0, 20.0);
                 }
@@ -895,12 +1056,22 @@ impl TextBoxManager {
             self.context.stroke_rect(box_.x, box_.y, 150.0, 30.0);
         }
     }
+
+    fn get_text_width(&self, text: &str) -> f64 {
+        self.context
+            .measure_text(text)
+            .map(|metrics| metrics.width())
+            .unwrap_or_else(|_| 0.0)
+    }
 }
 
 struct myTextBox {
     x: f64,
     y: f64,
+    width: f64,
     text: String,
+    composition_text: String,
+    cursor_position: usize,
 }
 
 impl myTextBox {
@@ -908,12 +1079,79 @@ impl myTextBox {
         Self {
             x,
             y,
+            width: 50.0, // 최소 폭 50px
             text: String::new(),
+            composition_text: String::new(),
+            cursor_position: 0,
         }
     }
 
     fn contains(&self, mouse_x: f64, mouse_y: f64) -> bool {
         mouse_x >= self.x && mouse_x <= self.x + 150.0 && mouse_y >= self.y && mouse_y <= self.y + 30.0
+    }
+
+    fn get_char_index_at_cursor(&self) -> usize {
+        self.cursor_position
+    }
+
+    fn get_byte_index_at_cursor(&self) -> usize {
+        self.text
+            .char_indices()
+            .nth(self.cursor_position)
+            .map(|(i, _)| i)
+            .unwrap_or(self.text.len())
+    }
+
+    fn insert_at_cursor(&mut self, value: &str, index: usize) {
+        let byte_index = self.get_byte_index_at_cursor();
+        self.text.insert_str(byte_index, value);
+        self.cursor_position += value.chars().count();
+    }
+
+    fn delete_before_cursor(&mut self) {
+        if self.cursor_position > 0 {
+            let byte_index = self.get_byte_index_at_cursor();
+            let prev_char_index = self
+                .text
+                .char_indices()
+                .take(self.cursor_position)
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+
+            self.text.replace_range(prev_char_index..byte_index, "");
+            self.cursor_position -= 1;
+        }
+    }
+
+    fn delete_at_cursor(&mut self) {
+        if self.cursor_position < self.text.chars().count() {
+            let start_index = self.get_byte_index_at_cursor();
+            let end_index = self.text[start_index..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| start_index + i)
+                .unwrap_or(self.text.len());
+
+            self.text.replace_range(start_index..end_index, "");
+        }
+    }
+
+    fn move_cursor_left(&mut self) {
+        if self.cursor_position > 0 {
+            self.cursor_position -= 1;
+        }
+    }
+
+    fn move_cursor_right(&mut self) {
+        if self.cursor_position < self.text.chars().count() {
+            self.cursor_position += 1;
+        }
+    }
+
+    fn update_width(&mut self, text_width: f64) {
+        // 최소 50px, 최대 400px
+        self.width = text_width.clamp(50.0, 400.0) + 10.0; // padding 포함
     }
 }
 
@@ -936,23 +1174,33 @@ pub fn setup_keyboard_shortcuts() -> Result<(), JsValue> {
         .ok_or("Failed to get 2D context")?
         .dyn_into::<CanvasRenderingContext2d>()?;
 
+    let context_clone = context.clone();
     let closure = Closure::wrap(Box::new(move |event: KeyboardEvent| {
-        if event.ctrl_key() && event.key() == "a" {
-            event.prevent_default(); // ✅ Prevent default browser "Select All" behavior
-            let _ = select_all_shapes(true);
-        }
-        else if event.key() == "Escape"{
-            event.prevent_default(); // ✅ Prevent default behavior
-            let _ = select_all_shapes(false);
-        }
-        else if event.key() == "Delete"{
-            event.prevent_default();
-            SHAPES.with(|shapes| {
-                shapes.borrow_mut().retain(|shape| !shape.is_selected());
-            });
+        TEXTBOXMANAGER.with(|tbm|{
+            if let Some(ref mut manager) = *tbm.borrow_mut() {
+                if manager.is_active(){
+                    manager.on_keydown(event);
+                }
+                else{
+                    if event.ctrl_key() && event.key() == "a" {
+                        event.prevent_default(); // ✅ Prevent default browser "Select All" behavior
+                        let _ = select_all_shapes(true);
+                    }
+                    else if event.key() == "Escape"{
+                        event.prevent_default(); // ✅ Prevent default behavior
+                        let _ = select_all_shapes(false);
+                    }
+                    else if event.key() == "Delete"{
+                        event.prevent_default();
+                        SHAPES.with(|shapes| {
+                            shapes.borrow_mut().retain(|shape| !shape.is_selected());
+                        });
 
-            redraw(&context);
-        }
+                        redraw(&context_clone);
+                    }
+                }
+            }
+        });
     }) as Box<dyn FnMut(_)>);
 
     window.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref()).unwrap();

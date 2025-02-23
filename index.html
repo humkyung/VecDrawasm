@@ -4,6 +4,107 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>숨은 그림 찾기</title>
+  <script type="module">
+        import init, {render_svg_to_canvas} from './pkg/vector_drawing_webapp.js';
+
+        async function start() {
+          await init();
+          console.log("✅ WebAssembly Initialized");
+
+          // ✅ Resize Canvas to Fit Screen
+          function resizeCanvas() {
+              const canvas = document.getElementById("drawing-canvas");
+              const toolbar = document.getElementById("toobar");
+
+              canvas.width = window.innerWidth - 300;
+              canvas.height = window.innerHeight - 50;
+          }
+
+          window.addEventListener("resize", resizeCanvas);
+        }
+
+        start();
+
+      /*
+        document.addEventListener("DOMContentLoaded", function () {
+          const libraryPanel = document.getElementById("library-panel");
+          let selectedItem = null;
+
+          const canvas = document.getElementById("drawing-canvas");
+          const ctx = canvas.getContext("2d");
+
+          // 🎯 드래그 앤 드롭 이벤트 추가
+          libraryPanel.addEventListener("dragover", (event) => {
+              event.preventDefault();
+              libraryPanel.classList.add("dragover");
+          });
+
+          libraryPanel.addEventListener("dragleave", () => {
+              libraryPanel.classList.remove("dragover");
+          });
+
+          libraryPanel.addEventListener("drop", (event) => {
+              event.preventDefault();
+              libraryPanel.classList.remove("dragover");
+
+              const files = event.dataTransfer.files;
+              for (let i = 0; i < files.length; i++) {
+                  const file = files[i];
+
+                  if (file.type === "image/svg+xml") {
+                      const reader = new FileReader();
+                      reader.onload = function (e) {
+                          addSvgToLibrary(e.target.result);
+                      };
+                      reader.readAsText(file);
+                  } else {
+                      alert("SVG 파일만 업로드할 수 있습니다.");
+                  }
+              }
+          });
+
+          // 🎯 라이브러리에 SVG 추가
+          function addSvgToLibrary(svgData) {
+            const item = document.createElement("div");
+            item.classList.add("library-item");
+            item.setAttribute("draggable", "true");
+            item.setAttribute("data-src", svgData); // 🎯 SVG 원본 데이터 저장
+
+            const img = document.createElement("img");
+            img.src = "data:image/svg+xml," + encodeURIComponent(svgData);
+            img.alt = "SVG Thumbnail";
+
+            item.appendChild(img);
+
+            // 🎯 드래그 시작 이벤트
+            item.addEventListener("dragstart", (event) => {
+                event.dataTransfer.setData("text/plain", svgData);
+            });
+
+            // 🎯 클릭하면 선택 상태 변경
+            item.addEventListener("click", () => {
+                if (selectedItem) {
+                    selectedItem.classList.remove("selected");
+                }
+                selectedItem = item;
+                selectedItem.classList.add("selected");
+            });
+
+            libraryPanel.appendChild(item);
+          }
+
+          // 🎯 Delete 키로 선택된 아이템 삭제
+          document.addEventListener("keydown", (event) => {
+              if (event.key === "Delete" || event.key === "Backspace") {
+                  if (selectedItem) {
+                      selectedItem.remove();
+                      selectedItem = null;
+                  }
+              }
+          });
+        });
+        */
+    </script> 
   <style>
     body {
       margin: 0;
@@ -231,107 +332,5 @@
             hiddenInput.focus();
         });
     </script>
-
-    <script type="module">
-        import init, {render_svg_to_canvas} from './pkg/vector_drawing_webapp.js';
-
-        async function start() {
-          await init();
-          console.log("✅ WebAssembly Initialized");
-
-          // ✅ Resize Canvas to Fit Screen
-          function resizeCanvas() {
-              const canvas = document.getElementById("drawing-canvas");
-              const toolbar = document.getElementById("toobar");
-
-              canvas.width = window.innerWidth - 300;
-              canvas.height = window.innerHeight - 50;
-          }
-
-          window.addEventListener("resize", resizeCanvas);
-        }
-
-        start();
-
-      /*
-        document.addEventListener("DOMContentLoaded", function () {
-          const libraryPanel = document.getElementById("library-panel");
-          let selectedItem = null;
-
-          const canvas = document.getElementById("drawing-canvas");
-          const ctx = canvas.getContext("2d");
-
-          // 🎯 드래그 앤 드롭 이벤트 추가
-          libraryPanel.addEventListener("dragover", (event) => {
-              event.preventDefault();
-              libraryPanel.classList.add("dragover");
-          });
-
-          libraryPanel.addEventListener("dragleave", () => {
-              libraryPanel.classList.remove("dragover");
-          });
-
-          libraryPanel.addEventListener("drop", (event) => {
-              event.preventDefault();
-              libraryPanel.classList.remove("dragover");
-
-              const files = event.dataTransfer.files;
-              for (let i = 0; i < files.length; i++) {
-                  const file = files[i];
-
-                  if (file.type === "image/svg+xml") {
-                      const reader = new FileReader();
-                      reader.onload = function (e) {
-                          addSvgToLibrary(e.target.result);
-                      };
-                      reader.readAsText(file);
-                  } else {
-                      alert("SVG 파일만 업로드할 수 있습니다.");
-                  }
-              }
-          });
-
-          // 🎯 라이브러리에 SVG 추가
-          function addSvgToLibrary(svgData) {
-            const item = document.createElement("div");
-            item.classList.add("library-item");
-            item.setAttribute("draggable", "true");
-            item.setAttribute("data-src", svgData); // 🎯 SVG 원본 데이터 저장
-
-            const img = document.createElement("img");
-            img.src = "data:image/svg+xml," + encodeURIComponent(svgData);
-            img.alt = "SVG Thumbnail";
-
-            item.appendChild(img);
-
-            // 🎯 드래그 시작 이벤트
-            item.addEventListener("dragstart", (event) => {
-                event.dataTransfer.setData("text/plain", svgData);
-            });
-
-            // 🎯 클릭하면 선택 상태 변경
-            item.addEventListener("click", () => {
-                if (selectedItem) {
-                    selectedItem.classList.remove("selected");
-                }
-                selectedItem = item;
-                selectedItem.classList.add("selected");
-            });
-
-            libraryPanel.appendChild(item);
-          }
-
-          // 🎯 Delete 키로 선택된 아이템 삭제
-          document.addEventListener("keydown", (event) => {
-              if (event.key === "Delete" || event.key === "Backspace") {
-                  if (selectedItem) {
-                      selectedItem.remove();
-                      selectedItem = null;
-                  }
-              }
-          });
-        });
-        */
-    </script>    
 </body>
 </html>

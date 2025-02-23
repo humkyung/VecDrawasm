@@ -21,4 +21,4 @@ crate-type = ["cdylib"]
 version = "0.3.77"
 features = ["Window", "Document", "HtmlCanvasElement", "HtmlElement", "HtmlTextAreaElement", "HtmlInputElement", "HtmlImageElement", "InputEvent", "MouseEvent", "WheelEvent", "KeyboardEvent", "CanvasGradient"
 , "CanvasRenderingContext2d", "DomRect", "DragEvent", "DataTransfer", "FileReader", "HtmlDivElement", "Path2d", "Element", "DomParser", "SupportedType", "Node", "NodeList"
-, "CssStyleDeclaration", "HtmlCollection", "HtmlStyleElement", "Event", "File", "FileList", "ImageData"]
+, "CssStyleDeclaration", "HtmlCollection", "HtmlStyleElement", "Event", "File", "FileList", "ImageData", "CompositionEvent", "TextMetrics"]
