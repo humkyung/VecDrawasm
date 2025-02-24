@@ -955,7 +955,7 @@ impl TextBoxManager {
             let text_clone = active_box.text.clone();
             let text_width = {
                 let text_clone = active_box.text.clone();
-                self.get_text_width(&text_clone)
+                get_text_width(&self.context, &text_clone)
             };
             active_box.update_width(text_width);
 
@@ -978,13 +978,13 @@ impl TextBoxManager {
             match event.key().as_str() {
                 "Backspace" => {
                     active_box.delete_before_cursor();
-                    let text_width = self.get_text_width(&text_clone);
+                    let text_width = get_text_width(&self.context, &text_clone);
                     active_box.update_width(text_width);
                     self.redraw();
                 }
                 "Delete" => {
                     active_box.delete_at_cursor();
-                    let text_width = self.get_text_width(&text_clone);
+                    let text_width = get_text_width(&self.context, &text_clone);
                     active_box.update_width(text_width);
                     self.redraw();
                 }
@@ -1038,10 +1038,10 @@ impl TextBoxManager {
 
             // 커서 및 조합 중인 글자 강조 표시
             if self.active_index == Some(i) {
-                let cursor_x = self.get_text_width(&box_.text[..box_.get_byte_index_at_cursor()]) + box_.x + 5.0;
+                let cursor_x = get_text_width(&self.context, &box_.text[..box_.get_byte_index_at_cursor()]) + box_.x + 5.0;
                 if self.is_composing && !box_.composition_text.is_empty() {
                     // 조합 중인 글자에 파란색 박스 표시
-                    let width = self.get_text_width(&box_.composition_text);
+                    let width = get_text_width(&self.context, &box_.composition_text);
                     self.context.set_stroke_style(&"blue".into());
                     self.context.stroke_rect(cursor_x, box_.y + 5.0, width, 22.0);
                 }else if self.cursor_visible {
@@ -1055,13 +1055,6 @@ impl TextBoxManager {
             }
             self.context.stroke_rect(box_.x, box_.y, 150.0, 30.0);
         }
-    }
-
-    fn get_text_width(&self, text: &str) -> f64 {
-        self.context
-            .measure_text(text)
-            .map(|metrics| metrics.width())
-            .unwrap_or_else(|_| 0.0)
     }
 }
 
@@ -1278,6 +1271,13 @@ fn get_selected_shapes() -> Vec<u32>{
             })
             .collect()
     })
+}
+
+fn get_text_width(context: &CanvasRenderingContext2d, text: &str) -> f64 {
+    context
+        .measure_text(text)
+        .map(|metrics| metrics.width())
+        .unwrap_or_else(|_| 0.0)
 }
 
 // 캔버스 다시 그리기
