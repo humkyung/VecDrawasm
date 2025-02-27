@@ -94,7 +94,6 @@ impl TextBoxManager {
         if let Some(index) = self.active_index {
             let active_box = &mut self.boxes[index];
             if let Some(data) = event.data() {
-                info!("Composition end: {}", data);
                 let index = active_box.get_byte_index_at_cursor();
                 active_box.insert_at_cursor(&data, index);
                 active_box.composition_text.clear();
@@ -356,30 +355,28 @@ impl TextBox{
         }
 
         let mut pos = self.cursor_position;
-        let row = self.get_row_index_at_cursor();
-        let col = self.get_column_index_at_cursor();
+        let mut row = self.get_row_index_at_cursor();
+        let mut col = self.get_column_index_at_cursor();
         info!("row: {}, col: {}", row, col);
 
-        if let Some(prev_newline) = self.text[..pos].rfind('\n') {
-            info!("prev_newline: {},{}", prev_newline, &self.text[..prev_newline]);
-            // 현재 줄이 첫 번째 줄인 경우
-            if prev_newline == 0 {
-                pos = 0;
-            } else if let Some(prev_prev_newline) = self.text[..prev_newline].rfind('\n') {
-                // 이전 줄이 존재하는 경우
-                let current_col = pos - prev_newline - 1; // 현재 커서가 몇 번째 칸인지 계산
-                let prev_line_length = prev_newline - prev_prev_newline - 1; // 이전 줄의 길이
+        if row > 0{
+            row -= 1;
 
-                pos = prev_prev_newline + 1 + current_col.min(prev_line_length); // 이전 줄에서 가능한 위치로 이동
-            } else {
-                pos = (pos - prev_newline - 1).min(prev_newline);
+            let lines = self.text.lines();
+            if let Some(line) = lines.clone().nth(row) {
+                if line.chars().count() < col {
+                    col = line.chars().count();
+                }
             }
-        } else {
-            pos = 0; // 첫 번째 줄로 이동
+
+            info!("row: {}, col: {}", row, col);
+            pos = lines.take(row - 1).map(|line| line.chars().count()).sum::<usize>() + col;
         }
 
-        info!("cursor line: {}", &self.text[..pos]);
         self.cursor_position = pos;
+
+        let index = self.get_byte_index_at_cursor();
+        info!("cursor line: {},{}", index, &self.text[..index]);
     }
 
     /// ✅ 아래쪽 줄로 이동
@@ -453,17 +450,16 @@ impl TextBox{
     }
 
     pub fn get_row_index_at_cursor(&self) -> usize {
-        let mut row = self.text[..self.cursor_position].matches('\n').count();
-
-        if !self.text.ends_with('\n'){
-            row += 1;
-        }
-
+        let index = self.get_byte_index_at_cursor();
+        let row = self.text[..index].lines().count();
         row
     }
 
     pub fn get_column_index_at_cursor(&self) -> usize {
-        self.text[..self.cursor_position].rfind('\n').map_or(self.cursor_position, |i| self.cursor_position - i - 1)
+        let index = self.get_byte_index_at_cursor();
+        let lines = self.text[..index].lines();
+        let column = lines.last().map_or(0, |line| line.chars().count());
+        column
     }
 
     pub fn update_width(&mut self, text_width: f64) {
