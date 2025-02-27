@@ -154,7 +154,7 @@ impl TextBoxManager {
                 "Enter" => {
                     let cursor_pos = active_box.get_char_index_at_cursor();
                     active_box.insert_at_cursor("\n", cursor_pos);
-                    active_box.cursor_position += 1;
+                    info!("Enter: {},{}", active_box.text,active_box.cursor_position);
 
                     // ✅ TextBox 높이 증가 (줄 개수에 맞게)
                     active_box.update_height(get_text_height(&active_box.text));
@@ -224,24 +224,15 @@ impl TextBoxManager {
             let text_to_draw = format!("{}{}{}", text_before_cursor, box_.composition_text, text_after_cursor);
             let lines: Vec<&str> = text_to_draw.lines().collect();
             for(line_idx, line) in lines.iter().enumerate(){
-                info!("line: {}", line);
-                /*
                 self.context
                     .fill_text(line, box_.position.x + 5.0, box_.position.y + 20.0 + (line_idx as f64) * 30.0)
                     .unwrap();
-                */
             }
 
             // 커서 및 조합 중인 글자 강조 표시
             if self.active_index == Some(i) {
-                info!("text_to_draw[..box_.get_byte_index_at_cursor() = {}]", &text_to_draw[..box_.get_byte_index_at_cursor()]);
                 let cursor_x = get_text_width(&self.context, &text_to_draw[..box_.get_byte_index_at_cursor()]) + box_.position.x + 5.0;
-                info!("cursor_x: {}", cursor_x);
-                info!("box_.cursor_position: {}", box_.cursor_position);
-                info!("text_to_draw: {}", text_to_draw.chars().count());
-                info!("text_to_draw[..box_.cursor_position]: {}", &text_to_draw[..box_.get_byte_index_at_cursor()]);
                 let cursor_y = box_.position.y + 5.0 + (text_to_draw[..box_.get_byte_index_at_cursor()].matches('\n').count() as f64) * 30.0;
-                info!("cursor_y: {}", cursor_y);
                 if self.is_composing && !box_.composition_text.is_empty() {
                     // 조합 중인 글자에 파란색 박스 표시
                     let width = get_text_width(&self.context, &box_.composition_text);
@@ -273,9 +264,16 @@ fn get_max_line_width(context: &CanvasRenderingContext2d, text: &str) -> f64 {
         .unwrap_or(50.0) // 최소 너비 50px
 }
 
+/// 텍스트 마지막 줄의 길이를 반환한다.
 fn get_text_width(context: &CanvasRenderingContext2d, text: &str) -> f64 {
+    // 마지막 줄이 개행 문자로 끝나면 길이 0
+    if text.ends_with('\n'){
+        return 0.0;
+    }
+
+    let last_text = text.lines().last().unwrap_or_default();
     context
-        .measure_text(text)
+        .measure_text(last_text)
         .map(|metrics| metrics.width())
         .unwrap_or_else(|_| 0.0)
 }
@@ -353,14 +351,34 @@ impl TextBox{
 
     /// ✅ 위쪽 줄로 이동
     fn move_cursor_up(&mut self) {
+        if self.cursor_position == 0 {
+            return; // 🚫 첫 줄에서는 더 위로 이동할 수 없음
+        }
+
         let mut pos = self.cursor_position;
+        let row = self.get_row_index_at_cursor();
+        let col = self.get_column_index_at_cursor();
+        info!("row: {}, col: {}", row, col);
+
         if let Some(prev_newline) = self.text[..pos].rfind('\n') {
-            if let Some(prev_prev_newline) = self.text[..prev_newline].rfind('\n') {
-                pos = prev_prev_newline + 1 + (pos - prev_newline - 1).min(prev_newline - prev_prev_newline - 1);
+            info!("prev_newline: {},{}", prev_newline, &self.text[..prev_newline]);
+            // 현재 줄이 첫 번째 줄인 경우
+            if prev_newline == 0 {
+                pos = 0;
+            } else if let Some(prev_prev_newline) = self.text[..prev_newline].rfind('\n') {
+                // 이전 줄이 존재하는 경우
+                let current_col = pos - prev_newline - 1; // 현재 커서가 몇 번째 칸인지 계산
+                let prev_line_length = prev_newline - prev_prev_newline - 1; // 이전 줄의 길이
+
+                pos = prev_prev_newline + 1 + current_col.min(prev_line_length); // 이전 줄에서 가능한 위치로 이동
             } else {
                 pos = (pos - prev_newline - 1).min(prev_newline);
             }
+        } else {
+            pos = 0; // 첫 번째 줄로 이동
         }
+
+        info!("cursor line: {}", &self.text[..pos]);
         self.cursor_position = pos;
     }
 
@@ -432,6 +450,20 @@ impl TextBox{
         if self.cursor_position < self.text.chars().count() {
             self.cursor_position += 1;
         }
+    }
+
+    pub fn get_row_index_at_cursor(&self) -> usize {
+        let mut row = self.text[..self.cursor_position].matches('\n').count();
+
+        if !self.text.ends_with('\n'){
+            row += 1;
+        }
+
+        row
+    }
+
+    pub fn get_column_index_at_cursor(&self) -> usize {
+        self.text[..self.cursor_position].rfind('\n').map_or(self.cursor_position, |i| self.cursor_position - i - 1)
     }
 
     pub fn update_width(&mut self, text_width: f64) {
