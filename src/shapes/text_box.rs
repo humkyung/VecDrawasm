@@ -16,6 +16,7 @@ use web_sys::{window, Document, CanvasRenderingContext2d, MouseEvent, Compositio
 
 use super::geometry::Vector2D;
 use super::geometry::{Point2D};
+use super::line;
 use super::shape::{Shape};
 
 pub struct TextBoxManager {
@@ -112,7 +113,7 @@ impl TextBoxManager {
             let active_box = &mut self.boxes[index];
             let value = event.data().unwrap_or_default();
 
-            let cursor_pos = active_box.get_char_index_at_cursor();
+            let cursor_pos = active_box.get_byte_index_at_cursor();
             active_box.insert_at_cursor(&value, cursor_pos);
 
             // 텍스트의 너비 계산 및 업데이트
@@ -357,7 +358,7 @@ impl TextBox{
         let mut pos = self.cursor_position;
         let mut row = self.get_row_index_at_cursor();
         let mut col = self.get_column_index_at_cursor();
-        info!("row: {}, col: {}", row, col);
+        info!("mouse move up row: {}, col: {}", row, col);
 
         if row > 0{
             row -= 1;
@@ -381,12 +382,30 @@ impl TextBox{
 
     /// ✅ 아래쪽 줄로 이동
     fn move_cursor_down(&mut self) {
-        if let Some(next_newline) = self.text[self.cursor_position..].find('\n') {
-            let current_line_pos = self.cursor_position - self.text[..self.cursor_position].rfind('\n').unwrap_or(0);
-            let new_cursor_base = self.cursor_position + next_newline + 1;
-            let next_line_len = self.text[new_cursor_base..].find('\n').unwrap_or(self.text.len() - new_cursor_base);
-            self.cursor_position = new_cursor_base + current_line_pos.min(next_line_len);
+
+        let mut pos = self.cursor_position;
+        let mut row = self.get_row_index_at_cursor();
+        let mut col = self.get_column_index_at_cursor();
+
+        info!("row: {}, col: {}", row, col);
+
+        let lines = self.text.lines();
+        let line_count = lines.clone().count();
+        if row < line_count{
+            row += 1;
+
+            if let Some(line) = lines.clone().nth(row) {
+                if line.chars().count() < col {
+                    col = line.chars().count();
+                }
+
+                let row_chars = lines.take(row - 1).map(|line| line.chars().count()).sum::<usize>();
+                info!("row_chars: {}, col: {}", row_chars, col);
+                pos = row_chars + col;
+            }
         }
+
+        self.cursor_position = pos;
     }
 
     pub fn get_char_index_at_cursor(&self) -> usize {
@@ -394,11 +413,12 @@ impl TextBox{
     }
 
     pub fn get_byte_index_at_cursor(&self) -> usize {
-        self.text
+        let index = self.text
             .char_indices()
             .nth(self.cursor_position)
             .map(|(i, _)| i)
-            .unwrap_or(self.text.len())
+            .unwrap_or(self.text.len());
+        index
     }
 
     /// 커서 위치에 텍스트를 입력한다.
@@ -408,6 +428,7 @@ impl TextBox{
         self.cursor_position += value.chars().count();
     }
 
+    /// 커서 위치의 이전 글자를 삭제한다.
     pub fn delete_before_cursor(&mut self) {
         if self.cursor_position > 0 {
             let byte_index = self.get_byte_index_at_cursor();
@@ -431,7 +452,7 @@ impl TextBox{
                 .char_indices()
                 .nth(1)
                 .map(|(i, _)| start_index + i)
-                .unwrap_or(self.text.len());
+                .unwrap_or(0);
 
             self.text.replace_range(start_index..end_index, "");
         }
@@ -452,14 +473,14 @@ impl TextBox{
     pub fn get_row_index_at_cursor(&self) -> usize {
         let index = self.get_byte_index_at_cursor();
         let row = self.text[..index].lines().count();
-        row
+        row - 1
     }
 
     pub fn get_column_index_at_cursor(&self) -> usize {
         let index = self.get_byte_index_at_cursor();
         let lines = self.text[..index].lines();
         let column = lines.last().map_or(0, |line| line.chars().count());
-        column
+        column - 1
     }
 
     pub fn update_width(&mut self, text_width: f64) {
