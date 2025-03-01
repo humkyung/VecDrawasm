@@ -8,6 +8,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::DomRect;
+use web_sys::Window;
 use web_sys::{window, Document, CanvasRenderingContext2d, HtmlCanvasElement, InputEvent, HtmlTextAreaElement, HtmlInputElement, HtmlImageElement, MouseEvent, WheelEvent, DragEvent, File, FileReader, Element, Path2d
     , HtmlDivElement , DomParser, HtmlElement, Node, NodeList, ImageData, Blob, KeyboardEvent, CompositionEvent, TextMetrics};
 use std::char::UNICODE_VERSION;
@@ -86,7 +87,6 @@ pub fn start() -> Result<(), JsValue> {
         let tbm = TextBoxManager::new(document.clone(), context.clone());
         *manager.borrow_mut() = Some(tbm);
     });
-    //let manager = Rc::new(RefCell::new(TextBoxManager::new(document.clone(), context.clone())));
 
     // ✅ 모드 선택 UI
     setup_mode_buttons();
@@ -350,13 +350,16 @@ pub fn start() -> Result<(), JsValue> {
                         TEXTBOXMANAGER.with(|tbm|{
                             if let Some(ref mut manager) = *tbm.borrow_mut() {
                                 if !manager.is_active(){
-                                    manager.on_click(event, current_x, current_y);
+                                    if let Some(tb) = manager.on_click(event, current_x, current_y, state.borrow().scale()){
+                                        GHOST.with(|ghost|{
+                                            *ghost.borrow_mut() = Some(Box::new(tb));
+                                        });
+                                    }
                                 }else{
                                     manager.finish_input();
                                 }
                             }
                         });
-                        //mouse_manager.borrow_mut().on_click(event);
                     }
                 }
 
@@ -404,6 +407,8 @@ pub fn start() -> Result<(), JsValue> {
             STATE.with(|state| {
                 canvas_clone.set_class_name("cursor-default");
 
+                draw_ruler(&context_clone, canvas_clone.width() as f64, canvas_clone.height() as f64, mouse_x, mouse_y);
+
                 IS_MOUSE_PRESSED.with(|pressed|{
                     if *pressed.borrow() {
                         if state.borrow().is_panning() {
@@ -428,8 +433,6 @@ pub fn start() -> Result<(), JsValue> {
                                 redraw(&context_clone);
 
                                 *animation_requested_clone.borrow_mut() = false;
-
-                                info!("panning dx={dx},dy={dy}"); // 값을 콘솔에 출력
                             }
                         }else if state.borrow().action_mode() == &state::ActionMode::Eraser{
                             let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
@@ -776,14 +779,12 @@ pub fn start() -> Result<(), JsValue> {
 
    { 
         // 커서 깜박임 타이머
-        //let cursor_manager = manager.clone();
         let closure = Closure::wrap(Box::new(move || {
             TEXTBOXMANAGER.with(|tbm|{
                 if let Some(ref mut manager) = *tbm.borrow_mut() {
                     manager.toggle_cursor();
                 }
             });
-            //cursor_manager.borrow_mut().toggle_cursor();
         }) as Box<dyn FnMut()>);
 
         window.set_interval_with_callback_and_timeout_and_arguments_0(closure.as_ref().unchecked_ref(), 500)?; // 500ms마다 깜박임
@@ -993,12 +994,11 @@ fn redraw(context: &CanvasRenderingContext2d) {
         context.set_fill_style(&JsValue::from_str(state.borrow().fill_color()));
         context.fill_rect(0.0, 0.0, canvas_width, canvas_height);
 
+        draw_ruler(&context, canvas.width() as f64, canvas.height() as f64, 0.0, 0.0);
+        draw_grid(&context, canvas_width, canvas_height, state.borrow().scale());
+
         // 줌 및 팬 적용 (기존의 scale과 offset 유지)
         context.set_transform(state.borrow().scale(), 0.0, 0.0, state.borrow().scale(), state.borrow().offset().x, state.borrow().offset().y).unwrap();
-
-        context.clear_rect(0.0, 0.0, canvas_width, canvas_height);
-        context.set_fill_style(&JsValue::from_str(state.borrow().fill_color()));
-        context.fill_rect(0.0, 0.0, canvas_width, canvas_height);
 
         SHAPES.with(|shapes| {
             for shape in shapes.borrow_mut().iter_mut() {
@@ -1012,6 +1012,87 @@ fn redraw(context: &CanvasRenderingContext2d) {
             }
         });
     });
+}
+
+fn draw_ruler(ctx: &CanvasRenderingContext2d, width: f64, height: f64, mouse_x: f64, mouse_y: f64) {
+    ctx.save();
+
+    ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).unwrap(); // 변환 초기화
+
+    ctx.clear_rect(0.0, 0.0, width, height);
+    ctx.set_fill_style(&"#ddd".into());
+
+    // 가로 Ruler 배경
+    ctx.fill_rect(0.0, 0.0, width, 20.0);
+    // 세로 Ruler 배경
+    ctx.fill_rect(0.0, 0.0, 20.0, height);
+
+    ctx.set_fill_style(&"#000".into());
+    ctx.set_font("10px Arial");
+
+    // 가로 눈금
+    for i in (0..width as i32).step_by(10) {
+        if i % 50 == 0 {
+            ctx.fill_text(&i.to_string(), i as f64 + 2.0, 15.0).unwrap();
+        }
+        ctx.fill_rect(i as f64, 18.0, 1.0, 2.0);
+    }
+
+    // 세로 눈금
+    for j in (0..height as i32).step_by(10) {
+        if j % 50 == 0 {
+            ctx.fill_text(&j.to_string(), 2.0, j as f64 + 12.0).unwrap();
+        }
+        ctx.fill_rect(18.0, j as f64, 2.0, 1.0);
+    }
+
+    // 마우스 위치 표시
+    if mouse_x >= 0.0 && mouse_y >= 0.0 {
+        ctx.set_fill_style(&"red".into());
+
+        // 가로 라인
+        ctx.fill_rect(mouse_x, 0.0, 1.0, 20.0);
+        // 세로 라인
+        ctx.fill_rect(0.0, mouse_y, 20.0, 1.0);
+
+        ctx.fill_text(&format!("{:.0}", mouse_x), mouse_x + 5.0, 15.0).unwrap();
+        ctx.fill_text(&format!("{:.0}", mouse_y), 2.0, mouse_y + 12.0).unwrap();
+    }
+
+    ctx.restore();
+}
+
+// 그리드 그리기
+const GRID_SIZE: f64 = 50.0; // 그리드 간격
+fn draw_grid(ctx: &CanvasRenderingContext2d, width: f64, height: f64, scale: f64) {
+    ctx.set_fill_style(&"#c0c0c0".into()); // 연한 회색 점
+
+    let width = width / scale;
+    let height = height / scale;
+    let grid_size = GRID_SIZE / scale;
+
+    // 점 그리드 생성
+    for y in (0..height as i32).step_by(grid_size as usize) {
+        for x in (0..width as i32).step_by(grid_size as usize) {
+            ctx.fill_rect(x as f64, y as f64, 2.0 / scale, 2.0 / scale);
+        }
+    }
+
+    // X/Y축 선 그리기
+    ctx.set_stroke_style(&"#000000".into()); // 검은색
+    ctx.set_line_width(1.0);
+
+    // X축 (중앙)
+    ctx.begin_path();
+    ctx.move_to(0.0, height / 2.0);
+    ctx.line_to(width, height / 2.0);
+    ctx.stroke();
+
+    // Y축 (중앙)
+    ctx.begin_path();
+    ctx.move_to(width / 2.0, 0.0);
+    ctx.line_to(width / 2.0, height);
+    ctx.stroke();
 }
 
 fn setup_mode_buttons() {

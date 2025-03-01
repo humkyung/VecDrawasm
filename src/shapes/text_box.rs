@@ -5,6 +5,9 @@ use std::iter::Scan;
 use std::str;
 use std::task::Context;
 use std::thread::panicking;
+use std::rc::Rc;
+use std::cell::RefCell;
+use js_sys::Reflect::get;
 use log::info;
 use wasm_bindgen::convert::FromWasmAbi;
 use wasm_bindgen::prelude::*;
@@ -22,6 +25,7 @@ use super::shape::{Shape};
 pub struct TextBoxManager {
     document: Document,
     context: CanvasRenderingContext2d,
+    attached: Rc<RefCell<Option<Box<TextBox>>>>,
     boxes: Vec<TextBox>,
     active_index: Option<usize>,
     cursor_visible: bool,
@@ -33,6 +37,7 @@ impl TextBoxManager {
         Self {
             document,
             context,
+            attached: RefCell::new(None).into(),
             boxes: Vec::new(),
             active_index: None,
             cursor_visible: true,
@@ -41,30 +46,36 @@ impl TextBoxManager {
         }
     }
 
+    /// 텍스트 박스를 연결한다.
+    pub fn set_attached(&mut self, attached: Option<Box<TextBox>>) {
+        *self.attached.borrow_mut() = attached;
+    }
+
     pub fn is_active(&self) -> bool {
         self.active_index.is_some()
     }
 
-    pub fn on_click(&mut self, event: MouseEvent, current_x: f64, current_y: f64) {
-        let x = event.client_x() as f64;
-        let y = event.client_y() as f64;
-
+    /// 마우스 클릭 이벤트 처리
+    pub fn on_click(&mut self, event: MouseEvent, current_x: f64, current_y: f64, scale: f64) -> Option<TextBox>{
         // 기존 박스 클릭 시 해당 박스를 활성화
         for (i, box_) in self.boxes.iter_mut().enumerate() {
-            if box_.contains(x, y) {
+            if box_.is_hit(current_x, current_y, scale) {
                 self.active_index = Some(i);
                 self.focus_hidden_input();
                 self.redraw();
-                return;
+                return None;
             }
         }
 
         // 새 박스 생성
-        self.boxes.push(TextBox::new(current_x, current_y));
+        let tb = TextBox::new(current_x, current_y);
+        self.boxes.push(tb);
         self.active_index = Some(self.boxes.len() - 1);
 
         self.focus_hidden_input();
         self.redraw();
+
+        Some(self.boxes.last().unwrap().clone())
     }
 
     pub fn finish_input(&mut self) {
@@ -74,6 +85,7 @@ impl TextBoxManager {
         self.redraw();
     }
 
+    /// 글자 조합 시작
     pub fn on_composition_start(&mut self) {
         self.is_composing = true;
         self.composition_text.clear();
@@ -95,8 +107,15 @@ impl TextBoxManager {
         if let Some(index) = self.active_index {
             let active_box = &mut self.boxes[index];
             if let Some(data) = event.data() {
-                let index = active_box.get_byte_index_at_cursor();
-                active_box.insert_at_cursor(&data, index);
+                active_box.insert_at_cursor(&data);
+
+                // 텍스트의 너비 계산 및 업데이트
+                let text_width = {
+                    let text_clone = active_box.text.clone();
+                    get_max_line_width(&self.context, &text_clone)
+                };
+                active_box.update_width(text_width);
+
                 active_box.composition_text.clear();
             }
             self.redraw();
@@ -113,14 +132,12 @@ impl TextBoxManager {
             let active_box = &mut self.boxes[index];
             let value = event.data().unwrap_or_default();
 
-            let cursor_pos = active_box.get_byte_index_at_cursor();
-            active_box.insert_at_cursor(&value, cursor_pos);
+            active_box.insert_at_cursor(&value);
 
             // 텍스트의 너비 계산 및 업데이트
-            let text_clone = active_box.text.clone();
             let text_width = {
                 let text_clone = active_box.text.clone();
-                get_text_width(&self.context, &text_clone)
+                get_max_line_width(&self.context, &text_clone)
             };
             active_box.update_width(text_width);
 
@@ -129,6 +146,7 @@ impl TextBoxManager {
         }
     }
 
+    /// 키보드 입력 처리
     pub fn on_keydown(&mut self, event: KeyboardEvent) {
         if self.is_composing {
             return; // IME 조합 중에는 keydown 이벤트 무시
@@ -141,23 +159,24 @@ impl TextBoxManager {
             match event.key().as_str() {
                 "Backspace" => {
                     active_box.delete_before_cursor();
-                    let text_width = get_text_width(&self.context, &text_clone);
+                    let text_width = get_max_line_width(&self.context, &text_clone);
                     active_box.update_width(text_width);
+                    active_box.update_height(active_box.get_height(&active_box.text));
                     self.redraw();
                 }
                 "Delete" => {
                     active_box.delete_at_cursor();
-                    let text_width = get_text_width(&self.context, &text_clone);
+                    let text_width = get_max_line_width(&self.context, &text_clone);
                     active_box.update_width(text_width);
+                    active_box.update_height(active_box.get_height(&active_box.text));
                     self.redraw();
                 }
                 "Enter" => {
-                    let cursor_pos = active_box.get_char_index_at_cursor();
-                    active_box.insert_at_cursor("\n", cursor_pos);
+                    active_box.insert_at_cursor("\n");
                     info!("Enter: {},{}", active_box.text,active_box.cursor_position);
 
                     // ✅ TextBox 높이 증가 (줄 개수에 맞게)
-                    active_box.update_height(get_text_height(&active_box.text));
+                    active_box.update_height(active_box.get_height(&active_box.text));
                     active_box.update_width(get_max_line_width(&self.context, &active_box.text));
                     
                     self.redraw();
@@ -179,12 +198,15 @@ impl TextBoxManager {
                     self.redraw();
                 }
                 "Home" =>{
-                    active_box.cursor_position = 0;
+                    active_box.move_cursor_to_line_start();
                     self.redraw();
                 }
                 "End" =>{
-                    active_box.cursor_position = active_box.text.chars().count();
+                    active_box.move_cursor_to_line_end();
                     self.redraw();
+                }
+                "Escape" => {
+                    self.finish_input();
                 }
                 _ => {}
             }
@@ -203,58 +225,70 @@ impl TextBoxManager {
         input.set_value("");
     }
 
+    /// 커서 표시 여부를 토글한다.
     pub fn toggle_cursor(&mut self) {
+        if self.active_index.is_none() {
+            return;
+        }
         self.cursor_visible = !self.cursor_visible;
         self.redraw();
     }
 
-    fn redraw(&self) {
+    fn redraw(&mut self) {
         //self.context.clear_rect(0.0, 0.0, 800.0, 600.0);
         self.context.set_font("20px sans-serif");
 
-        for (i, box_) in self.boxes.iter().enumerate() {
-            self.context.set_fill_style(&"lightgray".into());
-            self.context.fill_rect(box_.position.x, box_.position.y, box_.width, box_.height);
-
-            self.context.set_fill_style(&"black".into());
-
-            let byte_index = box_.get_byte_index_at_cursor();
-            let text_before_cursor = &box_.text[..byte_index];
-            let text_after_cursor = &box_.text[byte_index..];
-            let text_to_draw = format!("{}{}{}", text_before_cursor, box_.composition_text, text_after_cursor);
-            let lines: Vec<&str> = text_to_draw.lines().collect();
-            for(line_idx, line) in lines.iter().enumerate(){
-                self.context
-                    .fill_text(line, box_.position.x + 5.0, box_.position.y + 20.0 + (line_idx as f64) * 30.0)
-                    .unwrap();
+        for (i, box_) in self.boxes.iter_mut().enumerate() {
+            if self.active_index == Some(i) {
+                let byte_index = box_.get_byte_index_at_cursor();
+                let text_before_cursor = &box_.text[..byte_index];
+                let text_after_cursor = &box_.text[byte_index..];
+                let text_to_draw = format!("{}{}{}", text_before_cursor, box_.composition_text, text_after_cursor);
+                box_.update_width(get_max_line_width(&self.context, &text_to_draw));
             }
+
+            box_.draw(&self.context, 1.0);
 
             // 커서 및 조합 중인 글자 강조 표시
             if self.active_index == Some(i) {
+                let byte_index = box_.get_byte_index_at_cursor();
+                let text_before_cursor = &box_.text[..byte_index];
+                let text_after_cursor = &box_.text[byte_index..];
+                let text_to_draw = format!("{}{}{}", text_before_cursor, box_.composition_text, text_after_cursor);
+
                 let cursor_x = get_text_width(&self.context, &text_to_draw[..box_.get_byte_index_at_cursor()]) + box_.position.x + 5.0;
-                let cursor_y = box_.position.y + 5.0 + (text_to_draw[..box_.get_byte_index_at_cursor()].matches('\n').count() as f64) * 30.0;
+                let cursor_y = box_.position.y + 5.0 + (text_to_draw[..box_.get_byte_index_at_cursor()].matches('\n').count() as f64) * (box_.get_font_size() + box_.get_line_gap());
                 if self.is_composing && !box_.composition_text.is_empty() {
                     // 조합 중인 글자에 파란색 박스 표시
-                    let width = get_text_width(&self.context, &box_.composition_text);
-                    self.context.set_stroke_style(&"blue".into());
-                    self.context.stroke_rect(cursor_x, cursor_y, width, 22.0);
+                    let cursor_width = get_text_width(&self.context, &box_.composition_text);
+                    let cursor_height = box_.get_font_size() + box_.get_line_gap();
+                    self.context.set_fill_style(&"rgba(0, 0, 255, 0.3)".into()); // ✅ 반투명한 파란색 (alpha = 0.3)
+                    self.context.fill_rect(cursor_x, cursor_y, cursor_width, cursor_height);
                 }else if self.cursor_visible {
                     self.context.set_fill_style(&"blue".into());
-                    self.context.fill_rect(cursor_x, cursor_y, 2.0, 20.0);
+                    self.context.fill_rect(cursor_x, cursor_y, 2.0, box_.get_font_size() + box_.get_line_gap());
                 }
 
                 self.context.set_stroke_style(&"blue".into());
             } else {
                 self.context.set_stroke_style(&"gray".into());
             }
-            self.context.stroke_rect(box_.position.x, box_.position.y, box_.width, box_.height);
         }
     }
 }
 
-fn get_text_height(text: &str) -> f64 {
-    let line_count = text.lines().count().max(1); // 최소 1줄
-    (line_count as f64) * 30.0 // ✅ 줄 개수 × 줄 높이
+/// 주어진 text를 줄 단위로 분할하여 반환한다.
+/// '\n'으로 끝나는 경우 마지막 줄을 추가한다.
+fn split_lines<'a>(text: &'a str) -> Vec<&'a str> {
+    if text.is_empty() {
+        return vec![""];
+    }
+
+    let mut lines: Vec<&'a str> = text.lines().collect();
+    if text.ends_with('\n') {
+        lines.push("");
+    }
+    lines
 }
 
 fn get_max_line_width(context: &CanvasRenderingContext2d, text: &str) -> f64 {
@@ -262,6 +296,12 @@ fn get_max_line_width(context: &CanvasRenderingContext2d, text: &str) -> f64 {
         .map(|line| get_text_width(context,line))
         .max_by(|a, b| a.partial_cmp(b).unwrap())
         .unwrap_or(50.0) // 최소 너비 50px
+}
+
+/// 문자의 높이를 반환한다.
+fn get_char_height(context: &CanvasRenderingContext2d, text: &str) -> f64 {
+    let metrics = context.measure_text(text).unwrap();
+    metrics.actual_bounding_box_ascent() + metrics.actual_bounding_box_descent() // ✅ 글자 높이 반환
 }
 
 /// 텍스트 마지막 줄의 길이를 반환한다.
@@ -286,8 +326,11 @@ pub struct TextBox{
     selected: bool,
     hovered: bool,
     color: String,
+    background_color: String,
     axis_x: Vector2D,
     axis_y: Vector2D,
+    font_size: f64,
+    line_gap: f64,
     pub width: f64,
     height: f64,
     pub composition_text: String,
@@ -302,12 +345,15 @@ impl TextBox{
             , selected: false
             , hovered: false
             , color: "#000000".to_string()
+            , background_color: "lightgray".to_string() //
             , axis_x: Vector2D::AXIS_X
-            , axis_y: Vector2D::AXIS_Y,
-            width: 50.0,
-            height: 30.0,
-            composition_text: String::new(),
-            cursor_position: 0,}
+            , axis_y: Vector2D::AXIS_Y
+            , font_size: 20.0
+            , line_gap: 5.0
+            , width: 50.0
+            , height: 30.0
+            , composition_text: String::new()
+            , cursor_position: 0}
     }
 
     fn control_points(&self) -> Vec<Point2D>{
@@ -331,22 +377,24 @@ impl TextBox{
         axis_y
     }
 
-    pub fn contains(&self, mouse_x: f64, mouse_y: f64) -> bool {
-        mouse_x >= self.position.x && mouse_x <= self.position.x + self.width && mouse_y >= self.position.y && mouse_y <= self.position.y + 30.0
+    pub fn get_font_size(&self) -> f64 {
+        self.font_size
+    }
+
+    pub  fn get_line_gap(&self) -> f64 {
+        self.line_gap
+    }
+
+    // ✅ 텍스트 박스 높이 계산
+    fn get_height(&self, text: &str) -> f64 {
+        let lines = split_lines(text);
+        let line_count = lines.into_iter().count().max(1); // 최소 1줄
+        10.0 + (line_count as f64) * (self.font_size) + ((line_count - 1) as f64) * (self.line_gap)
     }
 
     /// ✅ 줄 개수에 따라 높이 자동 조정
     fn update_height(&mut self, height: f64) {
         self.height = height;
-    }
-
-    /// ✅ 현재 줄의 끝 위치로 커서 이동
-    fn move_cursor_to_line_end(&mut self) {
-        if let Some(next_newline) = self.text[self.cursor_position..].find('\n') {
-            self.cursor_position += next_newline;
-        } else {
-            self.cursor_position = self.text.len();
-        }
     }
 
     /// ✅ 위쪽 줄로 이동
@@ -370,14 +418,12 @@ impl TextBox{
                 }
             }
 
-            info!("row: {}, col: {}", row, col);
-            pos = lines.take(row - 1).map(|line| line.chars().count()).sum::<usize>() + col;
+            info!("cursor_position: {}, row: {}, col: {}", self.cursor_position, row, col);
+            pos = lines.take(row).map(|line| line.chars().count() + 1).sum::<usize>() + col;
+            info!("pos: {}", pos);
         }
 
         self.cursor_position = pos;
-
-        let index = self.get_byte_index_at_cursor();
-        info!("cursor line: {},{}", index, &self.text[..index]);
     }
 
     /// ✅ 아래쪽 줄로 이동
@@ -387,23 +433,53 @@ impl TextBox{
         let mut row = self.get_row_index_at_cursor();
         let mut col = self.get_column_index_at_cursor();
 
-        info!("row: {}, col: {}", row, col);
+        let lines = split_lines(&self.text);
+        let line_count = lines.iter().count();
 
-        let lines = self.text.lines();
-        let line_count = lines.clone().count();
-        if row < line_count{
+        info!("mouse move down cursor_position: {}, row: {}, col: {}, count: {}", self.cursor_position, row, col, line_count);
+
+        if row < line_count - 1{
             row += 1;
 
-            if let Some(line) = lines.clone().nth(row) {
-                if line.chars().count() < col {
-                    col = line.chars().count();
-                }
-
-                let row_chars = lines.take(row - 1).map(|line| line.chars().count()).sum::<usize>();
-                info!("row_chars: {}, col: {}", row_chars, col);
-                pos = row_chars + col;
+            let line = lines[row];
+            info!("line: {}", line);
+            if line.chars().count() < col {
+                col = line.chars().count();
             }
+
+            let row_chars = lines.into_iter().take(row).map(|line| line.chars().count() + 1).sum::<usize>();
+            info!("row_chars: {}, col: {}", row_chars, col);
+            pos = row_chars + col;
         }
+
+        self.cursor_position = pos;
+    }
+
+    /// ✅ 현재 줄의 시작으로 이동
+    fn move_cursor_to_line_start(&mut self) {
+        let row = self.get_row_index_at_cursor();
+        let col = 0;
+
+        let lines = split_lines(&self.text);
+
+        let row_chars = lines.into_iter().take(row).map(|line| line.chars().count() + 1).sum::<usize>();
+        let pos = row_chars + col;
+
+        self.cursor_position = pos;
+    }
+
+    /// ✅ 현재 줄의 끝으로 이동
+    fn move_cursor_to_line_end(&mut self) {
+        let mut pos = self.cursor_position;
+        let mut row = self.get_row_index_at_cursor();
+        let mut col = self.get_column_index_at_cursor();
+
+        let lines = split_lines(&self.text);
+        let line = lines[row];
+        col = line.chars().count();
+
+        let row_chars = lines.into_iter().take(row).map(|line| line.chars().count() + 1).sum::<usize>();
+        pos = row_chars + col;
 
         self.cursor_position = pos;
     }
@@ -422,7 +498,7 @@ impl TextBox{
     }
 
     /// 커서 위치에 텍스트를 입력한다.
-    pub fn insert_at_cursor(&mut self, value: &str, index: usize) {
+    pub fn insert_at_cursor(&mut self, value: &str) {
         let byte_index = self.get_byte_index_at_cursor();
         self.text.insert_str(byte_index, value);
         self.cursor_position += value.chars().count();
@@ -462,6 +538,7 @@ impl TextBox{
         if self.cursor_position > 0 {
             self.cursor_position -= 1;
         }
+        info!("move_cursor_left: {}, {}", self.cursor_position, self.text);
     }
 
     pub fn move_cursor_right(&mut self) {
@@ -472,20 +549,27 @@ impl TextBox{
 
     pub fn get_row_index_at_cursor(&self) -> usize {
         let index = self.get_byte_index_at_cursor();
-        let row = self.text[..index].lines().count();
-        row - 1
+        let line = &self.text[..index];
+        info!("get_row_index_at_cursor: {}, {}, {}", self.cursor_position, index, line);
+        let row = split_lines(line).iter().count() - 1;
+        info!("get_row_index_at_cursor: {}, {}", split_lines(line).join("\n"), row);
+        row
     }
 
     pub fn get_column_index_at_cursor(&self) -> usize {
         let index = self.get_byte_index_at_cursor();
-        let lines = self.text[..index].lines();
-        let column = lines.last().map_or(0, |line| line.chars().count());
-        column - 1
+        let line = &self.text[..index];
+        if line.is_empty() || line.ends_with('\n') {
+            0
+        } else {
+            let column = line.lines().last().map_or(0, |line| line.chars().count());
+            column
+        }
     }
 
     pub fn update_width(&mut self, text_width: f64) {
-        // 최소 50px, 최대 400px
-        self.width = text_width.clamp(50.0, 400.0) + 10.0; // padding 포함
+        // 최소 50px
+        self.width = text_width.clamp(50.0, f64::MAX) + 10.0; // padding 포함
     }
 }
 impl Shape for TextBox{
@@ -497,12 +581,12 @@ impl Shape for TextBox{
         0.0
     }
 
-    fn max_point(&self) -> Point2D{
+    fn min_point(&self) -> Point2D{
         Point2D::new(self.position.x, self.position.y)
     }
 
-    fn min_point(&self) -> Point2D{
-        Point2D::new(self.position.x, self.position.y)
+    fn max_point(&self) -> Point2D{
+        Point2D::new(self.position.x + self.width, self.position.y + self.height)
     }
 
     fn is_hit(&self, x: f64, y: f64, scale: f64) -> bool {
@@ -577,9 +661,25 @@ impl Shape for TextBox{
             context.set_stroke_style(&JsValue::from_str(&self.color));
         }
 
-        context.set_fill_style(&"#000000".into()); // Black text
-        context.set_font("20px Arial");
-        context.fill_text(&self.text, self.position.x, self.position.y).unwrap();
+        context.set_font("20px sans-serif");
+        
+        /// ✅ Draw text box
+        context.set_fill_style(&JsValue::from_str(&self.background_color));
+        context.fill_rect(self.position.x, self.position.y, self.width, self.height + 5.0);
+        context.stroke_rect(self.position.x, self.position.y, self.width, self.height.max(self.font_size + self.line_gap) + 5.0);
+
+        context.set_fill_style(&self.color.as_str().into());
+
+        let byte_index = self.get_byte_index_at_cursor();
+        let text_before_cursor = &self.text[..byte_index];
+        let text_after_cursor = &self.text[byte_index..];
+        let text_to_draw = format!("{}{}{}", text_before_cursor, self.composition_text, text_after_cursor);
+        let lines: Vec<&str> = text_to_draw.lines().collect();
+        for(line_idx, line) in lines.iter().enumerate(){
+            context
+                .fill_text(line, self.position.x + 5.0, self.position.y + 5.0 + self.font_size + (line_idx as f64) * (self.font_size + self.line_gap))
+                .unwrap();
+        }
 
         if self.selected{ self.draw_control_points(context, scale);}
 
