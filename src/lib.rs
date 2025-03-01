@@ -1,8 +1,10 @@
 use std::any::Any;
+use std::sync::Arc;
 use js_sys::Math::acosh;
 use js_sys::Promise;
 use js_sys::Uint32Array;
 use log::info;
+use shapes::rectangle;
 use state::{ActionMode, DrawingMode};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -13,8 +15,12 @@ use web_sys::{window, Document, CanvasRenderingContext2d, HtmlCanvasElement, Inp
     , HtmlDivElement , DomParser, HtmlElement, Node, NodeList, ImageData, Blob, KeyboardEvent, CompositionEvent, TextMetrics};
 use std::char::UNICODE_VERSION;
 use std::fs::OpenOptions;
-use std::rc::Rc;
+
 use std::cell::RefCell;
+use std::rc::Rc;
+use once_cell::sync::Lazy;
+use std::sync::{Mutex};
+use std::thread;
 
 mod shapes{
     pub mod geometry;
@@ -24,7 +30,12 @@ mod shapes{
     pub mod ellipse;
     pub mod text_box;
 }
+
+mod vec_draw_doc;
+use crate::vec_draw_doc::VecDrawDoc;
+
 use crate::shapes::geometry::{Point2D, Vector2D};
+use std::cmp::PartialEq;
 use crate::shapes::shape::{Shape, Pencil, Svg};
 use crate::shapes::{line::Line, rectangle::Rectangle, ellipse::Ellipse, text_box::TextBox, text_box::TextBoxManager};
 
@@ -37,8 +48,6 @@ pub mod hytos;
 thread_local! {
     static IS_MOUSE_PRESSED: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
     static STATE: Rc<RefCell<State>> = Rc::new(RefCell::new(State::new("#0000FF".to_string(), 1.0)));
-    static SHAPES: Rc<RefCell<Vec<Box<dyn Shape>>>> = Rc::new(RefCell::new(Vec::new()));
-    static GHOST: Rc<RefCell<Option<Box<dyn Shape>>>> = Rc::new(RefCell::new(None));
     static TEXTBOXMANAGER: Rc<RefCell<Option<TextBoxManager>>> = Rc::new(RefCell::new(None));
     static IMAGE_BACKUP: Rc<RefCell<Option<ImageData>>> = Rc::new(RefCell::new(None));
 }
@@ -250,9 +259,9 @@ pub fn start() -> Result<(), JsValue> {
 
         let mut svg = Svg::new(Point2D::new(x, y), svg_data); 
         svg.draw(context, 1.0);
-        SHAPES.with(|shapes| {
-            shapes.borrow_mut().push(Box::new(svg));
-        });
+
+        let instance = VecDrawDoc::instance();
+        instance.lock().unwrap().add_shape(Box::new(svg));
     }
 
     // 마우스 휠 이벤트 (줌)
@@ -286,7 +295,8 @@ pub fn start() -> Result<(), JsValue> {
 
                 // 캔버스 다시 그리기
                 let _ = context_clone.set_transform(state.borrow().scale(), 0.0, 0.0, state.borrow().scale(), offset.x, offset.y);
-                redraw(&context_clone);
+                let instance = VecDrawDoc::instance();
+                instance.lock().unwrap().draw(&context_clone, &*state.borrow());
             });
         })?;
     }
@@ -296,7 +306,6 @@ pub fn start() -> Result<(), JsValue> {
         let last_mouse_pos = Rc::clone(&last_mouse_pos);
         let canvas_clone = canvas.clone();
         let mouse_context_points= Rc::clone(&mouse_context_points);
-        //let mouse_manager = manager.clone();
 
         add_event_listener(&canvas, "mousedown", move |event: MouseEvent| {
             event.prevent_default();
@@ -319,30 +328,25 @@ pub fn start() -> Result<(), JsValue> {
                 }else if state.borrow().action_mode() == &state::ActionMode::Selection{
                     let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
 
-                    let unders = get_shapes_under_mouse(current_x, current_y, state.borrow().scale());
-                    let selected = get_selected_shapes();
-                    SHAPES.with(|shapes| {
-                        let selected_indices: Vec<u32> = unders.clone(); // ✅ Store indices first
+                    let instance = VecDrawDoc::instance();
+                    let doc = instance.lock().unwrap();
 
-                        let selection_changed: bool = (unders.is_empty() && !selected.is_empty()) || !unders.iter().all(|ele| selected.contains(ele));
-                        if selection_changed{
-                            for (index, shape) in shapes.borrow_mut().iter_mut().enumerate() {
-                                shape.set_selected(selected_indices.contains(&(index as u32)));
-                            }
+                    let unders = doc.get_shapes_under_mouse(current_x, current_y, state.borrow().scale());
+                    let selected = doc.get_selected_shapes();
 
-                            redraw(&context_clone);
-                        }
+                    let selection_changed: bool = (unders.is_empty() && !selected.is_empty()) || !unders.iter().all(|ele| selected.iter().any(|s| Arc::ptr_eq(ele, s)));
+                    if selection_changed{
+                        selected.iter().for_each(|shape| shape.lock().unwrap().set_selected(false));
+                    }
 
-                        for index in selected_indices {
-                            if let Some(shape) = shapes.borrow_mut().get_mut(index as usize) {
-                                let control_point_index = shape.get_control_point(current_x, current_y, state.borrow().scale());
-                                if control_point_index != -1 {
-                                    state.borrow_mut().set_selected_control_point(Some((index as i32, control_point_index)));
-                                    break;
-                                }
-                            }
-                        }
+                    unders.iter().for_each(|shape| {
+                        let mut shape = shape.lock().unwrap();
+                        let control_point_index = shape.get_control_point(current_x, current_y, state.borrow().scale());
+                        shape.set_selected_control_point(control_point_index);
+                        shape.set_selected(true);
                     });
+
+                    doc.draw(&context_clone, &*state.borrow());
                 }
                 else if state.borrow().action_mode() == &state::ActionMode::Drawing{
                     let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
@@ -350,10 +354,13 @@ pub fn start() -> Result<(), JsValue> {
                         TEXTBOXMANAGER.with(|tbm|{
                             if let Some(ref mut manager) = *tbm.borrow_mut() {
                                 if !manager.is_active(){
-                                    if let Some(tb) = manager.on_click(event, current_x, current_y, state.borrow().scale()){
-                                        GHOST.with(|ghost|{
-                                            *ghost.borrow_mut() = Some(Box::new(tb));
-                                        });
+                                    let instance = VecDrawDoc::instance();
+                                    let mut doc = instance.lock().unwrap();
+
+                                    doc.add_shape(Box::new(TextBox::new(current_x, current_y)));
+                                    // TextBoxManager 시작
+                                    if let Some(shape) = doc.nth(doc.count() - 1){
+                                        manager.attach(Arc::clone(&shape));
                                     }
                                 }else{
                                     manager.finish_input();
@@ -407,7 +414,7 @@ pub fn start() -> Result<(), JsValue> {
             STATE.with(|state| {
                 canvas_clone.set_class_name("cursor-default");
 
-                draw_ruler(&context_clone, canvas_clone.width() as f64, canvas_clone.height() as f64, mouse_x, mouse_y);
+                //draw_ruler(&context_clone, canvas_clone.width() as f64, canvas_clone.height() as f64, mouse_x, mouse_y);
 
                 IS_MOUSE_PRESSED.with(|pressed|{
                     if *pressed.borrow() {
@@ -430,176 +437,174 @@ pub fn start() -> Result<(), JsValue> {
                                         context_clone.put_image_data(image_data, 0.0, 0.0).unwrap();
                                     }
                                 });*/
-                                redraw(&context_clone);
+                                let instance = VecDrawDoc::instance();
+                                instance.lock().unwrap().draw(&context_clone, &*state.borrow());
 
                                 *animation_requested_clone.borrow_mut() = false;
                             }
                         }else if state.borrow().action_mode() == &state::ActionMode::Eraser{
                             let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
 
-                            SHAPES.with(|shapes| {
-                                let mut shapes = shapes.borrow_mut();
-                                shapes.retain(|shape| !shape.is_hit(current_x, current_y, state.borrow().scale())); // ✅ Remove nearby shapes
-                            });
-
-                            redraw(&context_clone);
+                            let instance = VecDrawDoc::instance();
+                            let mut doc = instance.lock().unwrap();
+                            doc.erase(current_x, current_y, state.borrow().scale());
+                            doc.draw(&context_clone, &*state.borrow());
                         }else if state.borrow().action_mode() == &state::ActionMode::Drawing{
                             let (last_x, last_y) = calculate_canvas_coordinates((last_x, last_y), (scroll_x, scroll_y));
                             let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
                             
                             let drawing_mode = *state.borrow().drawing_mode();
-                            GHOST.with(|ghost|{
-                                match drawing_mode {
-                                    DrawingMode::Pencil =>{
-                                        context_clone.set_stroke_style(&JsValue::from_str(state.borrow().color()));
-                                        context_clone.begin_path();
-                                        context_clone.move_to(last_x, last_y);
-                                        context_clone.line_to(current_x, current_y);
-                                        context_clone.stroke();
+                            match drawing_mode {
+                                DrawingMode::Pencil =>{
+                                    context_clone.set_stroke_style(&JsValue::from_str(state.borrow().color()));
+                                    context_clone.begin_path();
+                                    context_clone.move_to(last_x, last_y);
+                                    context_clone.line_to(current_x, current_y);
+                                    context_clone.stroke();
 
-                                        mouse_context_points.borrow_mut().push(Point2D { x: current_x, y: current_y });
-                                    }
-                                    DrawingMode::Line =>{
-                                        let start_point = *mouse_context_points.borrow().get(0).unwrap();
-
-                                        if let Some(ref shape) = *ghost.borrow() {
-                                            IMAGE_BACKUP.with(|backup| {
-                                                if let Some(ref image_data) = *backup.borrow() {
-                                                    context_clone.put_image_data(image_data, 0.0, 0.0).unwrap();
-                                                }
-                                            });
-                                            //shape.draw_xor(&context_clone);
-                                            //redraw(&context_clone);
-                                        }
-
-                                        let end_point = Point2D::new(current_x, current_y);
-                                        let line = Line::new(state.borrow().color().to_string(), state.borrow().line_width(), start_point, end_point);
-                                        line.draw_xor(&context_clone, state.borrow().scale());
-                                        *ghost.borrow_mut() = Some(Box::new(line));
-
-                                        if mouse_context_points.borrow().len() == 1{
-                                            mouse_context_points.borrow_mut().push(end_point);
-                                        }
-                                        else{
-                                            mouse_context_points.borrow_mut().remove(1);
-                                            mouse_context_points.borrow_mut().push(end_point);
-                                        }
-                                    }
-                                    DrawingMode::Rectangle =>{
-                                        let start_point = *mouse_context_points.borrow().get(0).unwrap();
-
-                                        if let Some(ref shape) = *ghost.borrow() {
-                                            IMAGE_BACKUP.with(|backup| {
-                                                if let Some(ref image_data) = *backup.borrow() {
-                                                    context_clone.put_image_data(image_data, 0.0, 0.0).unwrap();
-                                                }
-                                            });
-                                        }
-
-                                        let end_point = Point2D::new(current_x, current_y);
-                                        let width = end_point.x - start_point.x;
-                                        let height = end_point.y - start_point.y;
-                                        let rectangle = Rectangle::new(state.borrow().color().to_string(), state.borrow().line_width(), start_point, width, height);
-                                        rectangle.draw_xor(&context_clone, state.borrow().scale());
-                                        *ghost.borrow_mut() = Some(Box::new(rectangle));
-
-                                        if mouse_context_points.borrow().len() == 1{
-                                            mouse_context_points.borrow_mut().push(end_point);
-                                        }
-                                        else{
-                                            mouse_context_points.borrow_mut().remove(1);
-                                            mouse_context_points.borrow_mut().push(end_point);
-                                        }
-                                    }
-                                    DrawingMode::Ellipse =>{
-                                        let start_point = *mouse_context_points.borrow().get(0).unwrap();
-
-                                        if let Some(ref shape) = *ghost.borrow() {
-                                            IMAGE_BACKUP.with(|backup| {
-                                                if let Some(ref image_data) = *backup.borrow() {
-                                                    context_clone.put_image_data(image_data, 0.0, 0.0).unwrap();
-                                                }
-                                            });
-                                        }
-
-                                        let end_point = Point2D::new(current_x, current_y);
-                                        let width = end_point.x - start_point.x;
-                                        let height = end_point.y - start_point.y;
-                                        let center = Point2D::new(current_x - width * 0.5, current_y - height * 0.5);
-                                        let ellipse= Ellipse::new(center, width * 0.5, height * 0.5, 0.0, 0.0, std::f64::consts::PI * 2.0, state.borrow().color().to_string(), state.borrow().line_width());
-                                        ellipse.draw_xor(&context_clone, state.borrow().scale());
-                                        *ghost.borrow_mut() = Some(Box::new(ellipse));
-
-                                        if mouse_context_points.borrow().len() == 1{
-                                            mouse_context_points.borrow_mut().push(end_point);
-                                        }
-                                        else{
-                                            mouse_context_points.borrow_mut().remove(1);
-                                            mouse_context_points.borrow_mut().push(end_point);
-                                        }
-                                    }
-                                    DrawingMode::Text => {
-
-                                    }
-                                    _ => info!("not supported drawing mode: {drawing_mode}"), // 값을 콘솔에 출력
+                                    mouse_context_points.borrow_mut().push(Point2D { x: current_x, y: current_y });
                                 }
-                            });
+                                DrawingMode::Line =>{
+                                    let start_point = *mouse_context_points.borrow().get(0).unwrap();
+
+                                    /*
+                                    IMAGE_BACKUP.with(|backup| {
+                                        if let Some(ref image_data) = *backup.borrow() {
+                                            context_clone.put_image_data(image_data, 0.0, 0.0).unwrap();
+                                        }
+                                    });
+                                    */
+                                    //shape.draw_xor(&context_clone);
+                                    //redraw(&context_clone);
+
+                                    let instance = VecDrawDoc::instance();
+                                    let doc = instance.lock().unwrap();
+                                    doc.draw(&context_clone, &*state.borrow());
+
+                                    let end_point = Point2D::new(current_x, current_y);
+                                    let line = Line::new(state.borrow().color().to_string(), state.borrow().line_width(), start_point, end_point);
+                                    line.draw_xor(&context_clone, state.borrow().scale());
+
+                                    if mouse_context_points.borrow().len() == 1{
+                                        mouse_context_points.borrow_mut().push(end_point);
+                                    }
+                                    else{
+                                        mouse_context_points.borrow_mut().remove(1);
+                                        mouse_context_points.borrow_mut().push(end_point);
+                                    }
+                                }
+                                DrawingMode::Rectangle =>{
+                                    let start_point = *mouse_context_points.borrow().get(0).unwrap();
+
+                                    /*
+                                    IMAGE_BACKUP.with(|backup| {
+                                        if let Some(ref image_data) = *backup.borrow() {
+                                            context_clone.put_image_data(image_data, 0.0, 0.0).unwrap();
+                                        }
+                                    });
+                                   */ 
+
+                                    let instance = VecDrawDoc::instance();
+                                    let doc = instance.lock().unwrap();
+                                    doc.draw(&context_clone, &*state.borrow());
+
+                                    let end_point = Point2D::new(current_x, current_y);
+                                    let width = end_point.x - start_point.x;
+                                    let height = end_point.y - start_point.y;
+                                    let rectangle = Rectangle::new(state.borrow().color().to_string(), state.borrow().line_width(), start_point, width, height);
+                                    rectangle.draw_xor(&context_clone, state.borrow().scale());
+
+                                    if mouse_context_points.borrow().len() == 1{
+                                        mouse_context_points.borrow_mut().push(end_point);
+                                    }
+                                    else{
+                                        mouse_context_points.borrow_mut().remove(1);
+                                        mouse_context_points.borrow_mut().push(end_point);
+                                    }
+                                }
+                                DrawingMode::Ellipse =>{
+                                    let start_point = *mouse_context_points.borrow().get(0).unwrap();
+
+                                    /*
+                                    IMAGE_BACKUP.with(|backup| {
+                                        if let Some(ref image_data) = *backup.borrow() {
+                                            context_clone.put_image_data(image_data, 0.0, 0.0).unwrap();
+                                        }
+                                    });
+                                    */
+
+                                    let instance = VecDrawDoc::instance();
+                                    let doc = instance.lock().unwrap();
+                                    doc.draw(&context_clone, &*state.borrow());
+
+                                    let end_point = Point2D::new(current_x, current_y);
+                                    let width = end_point.x - start_point.x;
+                                    let height = end_point.y - start_point.y;
+                                    let center = Point2D::new(current_x - width * 0.5, current_y - height * 0.5);
+                                    let ellipse= Ellipse::new(center, width * 0.5, height * 0.5, 0.0, 0.0, std::f64::consts::PI * 2.0, state.borrow().color().to_string(), state.borrow().line_width());
+                                    ellipse.draw_xor(&context_clone, state.borrow().scale());
+
+                                    if mouse_context_points.borrow().len() == 1{
+                                        mouse_context_points.borrow_mut().push(end_point);
+                                    }
+                                    else{
+                                        mouse_context_points.borrow_mut().remove(1);
+                                        mouse_context_points.borrow_mut().push(end_point);
+                                    }
+                                }
+                                DrawingMode::Text => {
+                                }
+                                _ => info!("not supported drawing mode: {drawing_mode}"), // 값을 콘솔에 출력
+                            }
                         }
                         else{
-                            let selected = get_selected_shapes();
+                            let instance = VecDrawDoc::instance();
+                            let doc = instance.lock().unwrap();
+
+                            let selected = doc.get_selected_shapes();
                             if selected.len() > 0{
                                 let (last_x, last_y) = calculate_canvas_coordinates((last_x, last_y), (scroll_x, scroll_y));
                                 let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
                                 let dx = current_x - last_x;
                                 let dy = current_y - last_y;
 
-                                SHAPES.with(|shapes| {
-                                    let mut shapes = shapes.borrow_mut();
-
-                                    if let Some((selected_shape, selected_control_point)) = state.borrow().selected_control_point(){
-                                        if let Some(shape) = shapes.get_mut(selected_shape as usize){
-                                            shape.move_control_point_by(selected_control_point, dx, dy);
-                                        }
-                                    }
-                                    else {
-                                        for index in selected{
-                                            if let Some(shape) = shapes.get_mut(index as usize) {
-                                                shape.move_by(dx, dy);
-                                            }
-                                        }
+                                doc.get_selected_shapes().iter().for_each(|shape| {
+                                    let mut shape = shape.lock().unwrap();
+                                    let selected_control_point = shape.get_selected_control_point();
+                                    if selected_control_point != -1{
+                                        shape.move_control_point_by(selected_control_point, dx, dy);
+                                    }else{
+                                        shape.move_by(dx, dy);
                                     }
                                 });
 
-                                redraw(&context_clone);
+                                doc.draw(&context_clone, &*state.borrow());
                             }
                         }
                     }
                     else{
                         let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
 
-                        SHAPES.with(|shapes| {
-                            let mut shapes = shapes.borrow_mut(); // 직접 mutable reference 가져오기
-
-                            for shape in shapes.iter_mut() {
-                                if shape.is_selected(){
-                                    let index = shape.get_control_point(current_x, current_y, state.borrow().scale());
-                                    if index != -1{
-                                        if index == 8{
-                                            canvas_clone.set_class_name("cursor-move");
-                                        }
-                                        else{
-                                            canvas_clone.set_class_name("cursor-pointer");//"cursor-crosshair");
-                                        }
+                        let instance = VecDrawDoc::instance();
+                        let doc = instance.lock().unwrap();
+                        doc.shapes.iter().for_each(|shape| {
+                            if shape.lock().unwrap().is_selected(){
+                                let index = shape.lock().unwrap().get_control_point(current_x, current_y, state.borrow().scale());
+                                if index != -1{
+                                    if index == 8{
+                                        canvas_clone.set_class_name("cursor-move");
+                                    }
+                                    else{
+                                        canvas_clone.set_class_name("cursor-pointer");//"cursor-crosshair");
                                     }
                                 }
-                                else if shape.is_hit(current_x, current_y, state.borrow().scale()) {
-                                    shape.set_hovered(true);
-                                } else {
-                                    shape.set_hovered(false);
-                                }
-
-                                shape.draw(&context_clone, state.borrow().scale());
+                            }else if shape.lock().unwrap().is_hit(current_x, current_y, state.borrow().scale()) {
+                                shape.lock().unwrap().set_hovered(true);
+                            } else {
+                                shape.lock().unwrap().set_hovered(false);
                             }
+
+                            shape.lock().unwrap().draw(&context_clone, state.borrow().scale());
                         });
                     }
                 });
@@ -631,18 +636,20 @@ pub fn start() -> Result<(), JsValue> {
                     match drawing_mode{
                         DrawingMode::Pencil =>{
                             let pencil = Pencil::new(state.borrow().color().to_string(), state.borrow().line_width(), mouse_context_points.borrow().clone());
-                            SHAPES.with(|shapes| {
-                                shapes.borrow_mut().push(Box::new(pencil));
-                            });
+
+                            let instance = VecDrawDoc::instance();
+                            let mut doc = instance.lock().unwrap();
+                            doc.add_shape(Box::new(pencil));
                         }
                         DrawingMode::Line =>{
                             let mouse_context_points_ref = mouse_context_points.borrow();
                             let start = mouse_context_points_ref.get(0).unwrap();
                             let end = mouse_context_points_ref.get(mouse_context_points.borrow().len() - 1).unwrap();
                             let line = Line::new(state.borrow().color().to_string(), state.borrow().line_width(), *start, *end);
-                            SHAPES.with(|shapes| {
-                                shapes.borrow_mut().push(Box::new(line));
-                            });
+
+                            let instance = VecDrawDoc::instance();
+                            let mut doc = instance.lock().unwrap();
+                            doc.add_shape(Box::new(line));
                         }
                         DrawingMode::Rectangle =>{
                             let mouse_context_points_ref = mouse_context_points.borrow();
@@ -651,9 +658,10 @@ pub fn start() -> Result<(), JsValue> {
                             let width = end.x - start.x;
                             let height = end.y - start.y;
                             let rectangle = Rectangle::new(state.borrow().color().to_string(), state.borrow().line_width(), *start, width, height);
-                            SHAPES.with(|shapes| {
-                                shapes.borrow_mut().push(Box::new(rectangle));
-                            });
+
+                            let instance = VecDrawDoc::instance();
+                            let mut doc = instance.lock().unwrap();
+                            doc.add_shape(Box::new(rectangle));
                         }
                         DrawingMode::Ellipse =>{
                             let mouse_context_points_ref = mouse_context_points.borrow();
@@ -663,9 +671,10 @@ pub fn start() -> Result<(), JsValue> {
                             let height = end.y - start.y;
                             let center = Point2D::new((start.x + end.x) * 0.5, (start.y + end.y) * 0.5);
                             let ellipse = Ellipse::new(center, width * 0.5, height * 0.5, 0.0, 0.0, std::f64::consts::PI * 2.0, state.borrow().color().to_string(), state.borrow().line_width());
-                            SHAPES.with(|shapes| {
-                                shapes.borrow_mut().push(Box::new(ellipse));
-                            });
+
+                            let instance = VecDrawDoc::instance();
+                            let mut doc = instance.lock().unwrap();
+                            doc.add_shape(Box::new(ellipse));
                         }
                         DrawingMode::Text =>{
                             /*
@@ -686,7 +695,9 @@ pub fn start() -> Result<(), JsValue> {
 
                 mouse_context_points.borrow_mut().clear();
 
-                //redraw(&context_clone);
+                let instance = VecDrawDoc::instance();
+                let doc = instance.lock().unwrap();
+                doc.draw(&context_clone, &*state.borrow());
             });
         })?;
     }
@@ -841,11 +852,12 @@ pub fn start() -> Result<(), JsValue> {
         let context_clone = Rc::new(context.clone());
 
         let closure = Closure::wrap(Box::new(move |_event: web_sys::MouseEvent| {
-            SHAPES.with(|shapes| {
-                shapes.borrow_mut().clear();
+            let instance = VecDrawDoc::instance();
+            let mut doc = instance.lock().unwrap();
+            doc.clear();
+            STATE.with(|state| {
+                doc.draw(&context_clone, &*state.borrow());
             });
-
-            redraw(&context_clone);
         }) as Box<dyn FnMut(_)>);
 
         let clear_button = document.get_element_by_id("clear-btn").unwrap();
@@ -893,11 +905,13 @@ pub fn setup_keyboard_shortcuts() -> Result<(), JsValue> {
                     }
                     else if event.key() == "Delete"{
                         event.prevent_default();
-                        SHAPES.with(|shapes| {
-                            shapes.borrow_mut().retain(|shape| !shape.is_selected());
-                        });
 
-                        redraw(&context_clone);
+                        STATE.with(|state| {
+                            let instance = VecDrawDoc::instance();
+                            let mut doc = instance.lock().unwrap();
+                            doc.delete_selected();
+                            doc.draw(&context_clone, &*state.borrow());
+                        });
                     }
                 }
             }
@@ -929,170 +943,18 @@ fn select_all_shapes(selected: bool) -> Result<(), JsValue> {
         .ok_or("Failed to get 2D context")?
         .dyn_into::<CanvasRenderingContext2d>()?;
 
-    SHAPES.with(|shapes| {
-        for shape in shapes.borrow_mut().iter_mut() {
-            shape.set_selected(selected);
-        }
+    let instance = VecDrawDoc::instance();
+    let mut doc = instance.lock().unwrap();
+    doc.shapes.iter_mut().for_each(|shape| {
+        shape.lock().unwrap().set_selected(selected);
     });
 
-    redraw(&context);
+    STATE.with(|state| {
+        doc.draw(&context, &*state.borrow());
+    });
 
     Ok(())
 
-}
-
-/*
-    마우스 커서 아래에 있는 Shape의 인덱스를 리턴한다.
-*/
-fn get_shapes_under_mouse(x: f64, y: f64, scale: f64) -> Vec<u32>{
-    SHAPES.with(|shapes| {
-        shapes
-            .borrow()
-            .iter()
-            .enumerate()
-            .filter_map(|(index, shape)| {
-                if shape.is_hit(x, y, scale) {
-                    Some(index as u32)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    })
-}
-
-/*
-    선택된 객체의 인덱스를 리턴한다.
-*/
-fn get_selected_shapes() -> Vec<u32>{
-    SHAPES.with(|shapes| {
-        shapes
-            .borrow()
-            .iter()
-            .enumerate()
-            .filter_map(|(index, shape)| {
-                if shape.is_selected() {
-                    Some(index as u32)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    })
-}
-
-// 캔버스 다시 그리기
-fn redraw(context: &CanvasRenderingContext2d) {
-    let canvas = context.canvas().unwrap();
-    let canvas_width = canvas.width() as f64;
-    let canvas_height = canvas.height() as f64;
-
-    STATE.with(|state|{
-        // 잔상 방지를 위해 전체 캔버스를 리셋
-        context.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).unwrap(); // 변환 초기화
-        context.clear_rect(0.0, 0.0, canvas_width, canvas_height); // 전체 캔버스 지우기
-        context.set_fill_style(&JsValue::from_str(state.borrow().fill_color()));
-        context.fill_rect(0.0, 0.0, canvas_width, canvas_height);
-
-        draw_ruler(&context, canvas.width() as f64, canvas.height() as f64, 0.0, 0.0);
-        draw_grid(&context, canvas_width, canvas_height, state.borrow().scale());
-
-        // 줌 및 팬 적용 (기존의 scale과 offset 유지)
-        context.set_transform(state.borrow().scale(), 0.0, 0.0, state.borrow().scale(), state.borrow().offset().x, state.borrow().offset().y).unwrap();
-
-        SHAPES.with(|shapes| {
-            for shape in shapes.borrow_mut().iter_mut() {
-                shape.draw(context, state.borrow().scale());
-            }
-        });
-
-        GHOST.with(|ghost| {
-            if let Some(ref mut shape) = *ghost.borrow_mut(){
-                shape.draw(context, state.borrow().scale());
-            }
-        });
-    });
-}
-
-fn draw_ruler(ctx: &CanvasRenderingContext2d, width: f64, height: f64, mouse_x: f64, mouse_y: f64) {
-    ctx.save();
-
-    ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).unwrap(); // 변환 초기화
-
-    ctx.clear_rect(0.0, 0.0, width, height);
-    ctx.set_fill_style(&"#ddd".into());
-
-    // 가로 Ruler 배경
-    ctx.fill_rect(0.0, 0.0, width, 20.0);
-    // 세로 Ruler 배경
-    ctx.fill_rect(0.0, 0.0, 20.0, height);
-
-    ctx.set_fill_style(&"#000".into());
-    ctx.set_font("10px Arial");
-
-    // 가로 눈금
-    for i in (0..width as i32).step_by(10) {
-        if i % 50 == 0 {
-            ctx.fill_text(&i.to_string(), i as f64 + 2.0, 15.0).unwrap();
-        }
-        ctx.fill_rect(i as f64, 18.0, 1.0, 2.0);
-    }
-
-    // 세로 눈금
-    for j in (0..height as i32).step_by(10) {
-        if j % 50 == 0 {
-            ctx.fill_text(&j.to_string(), 2.0, j as f64 + 12.0).unwrap();
-        }
-        ctx.fill_rect(18.0, j as f64, 2.0, 1.0);
-    }
-
-    // 마우스 위치 표시
-    if mouse_x >= 0.0 && mouse_y >= 0.0 {
-        ctx.set_fill_style(&"red".into());
-
-        // 가로 라인
-        ctx.fill_rect(mouse_x, 0.0, 1.0, 20.0);
-        // 세로 라인
-        ctx.fill_rect(0.0, mouse_y, 20.0, 1.0);
-
-        ctx.fill_text(&format!("{:.0}", mouse_x), mouse_x + 5.0, 15.0).unwrap();
-        ctx.fill_text(&format!("{:.0}", mouse_y), 2.0, mouse_y + 12.0).unwrap();
-    }
-
-    ctx.restore();
-}
-
-// 그리드 그리기
-const GRID_SIZE: f64 = 50.0; // 그리드 간격
-fn draw_grid(ctx: &CanvasRenderingContext2d, width: f64, height: f64, scale: f64) {
-    ctx.set_fill_style(&"#c0c0c0".into()); // 연한 회색 점
-
-    let width = width / scale;
-    let height = height / scale;
-    let grid_size = GRID_SIZE / scale;
-
-    // 점 그리드 생성
-    for y in (0..height as i32).step_by(grid_size as usize) {
-        for x in (0..width as i32).step_by(grid_size as usize) {
-            ctx.fill_rect(x as f64, y as f64, 2.0 / scale, 2.0 / scale);
-        }
-    }
-
-    // X/Y축 선 그리기
-    ctx.set_stroke_style(&"#000000".into()); // 검은색
-    ctx.set_line_width(1.0);
-
-    // X축 (중앙)
-    ctx.begin_path();
-    ctx.move_to(0.0, height / 2.0);
-    ctx.line_to(width, height / 2.0);
-    ctx.stroke();
-
-    // Y축 (중앙)
-    ctx.begin_path();
-    ctx.move_to(width / 2.0, 0.0);
-    ctx.line_to(width / 2.0, height);
-    ctx.stroke();
 }
 
 fn setup_mode_buttons() {

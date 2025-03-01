@@ -18,13 +18,15 @@ use svgtypes::Transform;
 use super::geometry::{Point2D, Vector2D};
 
 // Shape 트레이트 정의
-pub trait Shape{
+pub trait Shape : Send + Sync + Any{
     fn color(&self) -> &str;
     fn line_width(&self) -> f64 { 2.0 }
     fn max_point(&self) -> Point2D;
     fn min_point(&self) -> Point2D;
     fn is_hit(&self, x: f64, y: f64, scale: f64) -> bool;
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32;
+    fn get_selected_control_point(&self) -> i32;
+    fn set_selected_control_point(&mut self, index: i32);
     fn is_selected(&self) -> bool;
     fn set_selected(&mut self, selected: bool);
     fn set_hovered(&mut self, hovered: bool);
@@ -33,8 +35,15 @@ pub trait Shape{
     fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64);
     fn draw_xor(&self, context: &CanvasRenderingContext2d, scale: f64);
     fn draw_control_points(&self, context: &CanvasRenderingContext2d, scale: f64);
-    fn as_any(&self) -> &dyn Any;
+    fn as_any(&self) -> &dyn Any;   // ✅ Needed for downcasting
     fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+
+// ✅ Implement PartialEq for dyn Shape (by type downcasting)
+impl PartialEq for dyn Shape {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_any().type_id() == other.as_any().type_id() // ✅ Compare types
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -44,10 +53,17 @@ pub struct Pencil{
     color: String,
     line_width: f64,
     points: Vec<Point2D>,
+    selected_control_point: i32,
 }
 impl Pencil{
     pub fn new(color: String, line_width: f64, points: Vec<Point2D>) -> Self {
-        Pencil{selected: false, hovered: false, color, line_width, points}
+        Pencil{
+            selected: false, 
+            hovered: false, 
+            color, 
+            line_width, 
+            points,
+            selected_control_point: -1,}
     }
 
     pub fn add_point(&mut self, point: Point2D){
@@ -99,6 +115,14 @@ impl Shape for Pencil{
             }
         }
         -1
+    }
+
+    fn get_selected_control_point(&self) -> i32 {
+        self.selected_control_point
+    }
+
+    fn set_selected_control_point(&mut self, index: i32) {
+        self.selected_control_point = index;
     }
 
     fn is_selected(&self) -> bool {
@@ -220,13 +244,19 @@ pub struct Svg{
     selected: bool,
     location: Point2D,
     content: String,
+    selected_control_point: i32,
 
     styles: Option<HashMap<String, HashMap<String, String>>>,
 }
 
 impl Svg{
     pub fn new(location: Point2D, svg_text: &str) -> Self {
-        Svg{selected: false, location, content: svg_text.to_string(), styles: None}
+        Svg{
+            selected: false, 
+            location, 
+            selected_control_point: -1,
+            content: svg_text.to_string(), 
+            styles: None}
     }
 
     // 🎯 SVG에서 Gradient를 추출하는 함수
@@ -918,6 +948,14 @@ impl Shape for Svg{
 
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
         -1
+    }
+
+    fn get_selected_control_point(&self) -> i32 {
+        self.selected_control_point
+    }
+
+    fn set_selected_control_point(&mut self, index: i32) {
+        self.selected_control_point = index;
     }
 
     fn is_selected(&self) -> bool {

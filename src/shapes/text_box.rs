@@ -17,6 +17,10 @@ use web_sys::console::group;
 use web_sys::console::info;
 use web_sys::{window, Document, CanvasRenderingContext2d, MouseEvent, CompositionEvent, InputEvent, KeyboardEvent};
 
+use std::sync::{Arc, Mutex};
+use once_cell::sync::Lazy;
+use std::thread;
+
 use super::geometry::Vector2D;
 use super::geometry::{Point2D};
 use super::line;
@@ -25,8 +29,7 @@ use super::shape::{Shape};
 pub struct TextBoxManager {
     document: Document,
     context: CanvasRenderingContext2d,
-    attached: Rc<RefCell<Option<Box<TextBox>>>>,
-    boxes: Vec<TextBox>,
+    attached: Option<Arc<Mutex<Box<dyn Shape>>>>,
     active_index: Option<usize>,
     cursor_visible: bool,
     is_composing: bool,
@@ -37,8 +40,7 @@ impl TextBoxManager {
         Self {
             document,
             context,
-            attached: RefCell::new(None).into(),
-            boxes: Vec::new(),
+            attached: None,
             active_index: None,
             cursor_visible: true,
             is_composing: false,
@@ -46,41 +48,52 @@ impl TextBoxManager {
         }
     }
 
+    /*pub fn get_attached(&self) -> Option<TextBox> {
+        self.attached.borrow().clone()
+    }
+    */
+
     /// 텍스트 박스를 연결한다.
-    pub fn set_attached(&mut self, attached: Option<Box<TextBox>>) {
-        *self.attached.borrow_mut() = attached;
+    pub fn attach(&mut self, attached: Arc<Mutex<Box<dyn Shape>>>) {
+        self.attached = Some(attached);
+
+        self.focus_hidden_input();
+        self.redraw();
+    }
+
+    pub fn detach(&mut self) {
+        self.attached = None;
     }
 
     pub fn is_active(&self) -> bool {
-        self.active_index.is_some()
+        self.attached.is_some()
+        //self.attached.as_ref().map(|a| a.lock().unwrap()).is_some()
     }
 
     /// 마우스 클릭 이벤트 처리
-    pub fn on_click(&mut self, event: MouseEvent, current_x: f64, current_y: f64, scale: f64) -> Option<TextBox>{
+    pub fn on_click(&mut self, event: MouseEvent, current_x: f64, current_y: f64, scale: f64){
         // 기존 박스 클릭 시 해당 박스를 활성화
+        /*
         for (i, box_) in self.boxes.iter_mut().enumerate() {
             if box_.is_hit(current_x, current_y, scale) {
                 self.active_index = Some(i);
                 self.focus_hidden_input();
                 self.redraw();
-                return None;
+                return;
             }
         }
+        */
 
         // 새 박스 생성
-        let tb = TextBox::new(current_x, current_y);
-        self.boxes.push(tb);
-        self.active_index = Some(self.boxes.len() - 1);
+        //self.set_attached(Some(Box::new(TextBox::new(current_x, current_y))));
 
         self.focus_hidden_input();
         self.redraw();
-
-        Some(self.boxes.last().unwrap().clone())
     }
 
     pub fn finish_input(&mut self) {
         // 입력 완료 및 비활성화
-        self.active_index = None;
+        self.detach();
         self.clear_hidden_input();
         self.redraw();
     }
@@ -93,10 +106,18 @@ impl TextBoxManager {
 
     /// 글자 조합 중인 상태
     pub fn on_composition_update(&mut self, event: CompositionEvent) {
-        if let Some(index) = self.active_index {
-            let active_box = &mut self.boxes[index];
-            self.composition_text = event.data().unwrap();
-            active_box.composition_text = self.composition_text.clone();
+        if !self.is_active() {
+            return;
+        }
+
+        if let Some(attached) = &self.attached {
+            let mut shape = attached.lock().unwrap();
+            if let Some(tb) = shape.as_any_mut().downcast_mut::<TextBox>() {
+                self.composition_text = event.data().unwrap();
+                tb.composition_text = self.composition_text.clone();
+                drop(tb); // Release the mutable borrow before calling redraw
+            }
+            drop(shape); // Release the immutable borrow before calling redraw
             self.redraw();
         }
     }
@@ -104,112 +125,130 @@ impl TextBoxManager {
     /// 글자 조합이 완료된 상태
     pub fn on_composition_end(&mut self, event: CompositionEvent) {
         self.is_composing = false;
-        if let Some(index) = self.active_index {
-            let active_box = &mut self.boxes[index];
-            if let Some(data) = event.data() {
-                active_box.insert_at_cursor(&data);
 
-                // 텍스트의 너비 계산 및 업데이트
-                let text_width = {
-                    let text_clone = active_box.text.clone();
-                    get_max_line_width(&self.context, &text_clone)
-                };
-                active_box.update_width(text_width);
-
-                active_box.composition_text.clear();
-            }
-            self.redraw();
+        if !self.is_active() {
+            return;
         }
+
+        if let Some(attached) = &self.attached {
+            let mut shape = attached.lock().unwrap();
+            if let Some(tb) = shape.as_any_mut().downcast_mut::<TextBox>() {
+                if let Some(data) = event.data() {
+                    tb.insert_at_cursor(&data);
+                    info!("on_composition_end: {}", tb.text);
+
+                    // 텍스트의 너비 계산 및 업데이트
+                    let text_width = {
+                        let text_clone = tb.text.clone();
+                        get_max_line_width(&self.context, &text_clone)
+                    };
+                    tb.update_width(text_width);
+                    tb.composition_text.clear();
+                }
+                drop(shape); // Release the mutable borrow before calling redraw
+                self.redraw();
+            }
+        }
+
         self.clear_hidden_input();
     }
 
     pub fn on_input(&mut self, event: InputEvent) {
-        if self.is_composing {
+        if self.is_composing || !self.is_active(){
             return; // IME 조합 중에는 input 이벤트 무시
         }
 
-        if let Some(index) = self.active_index {
-            let active_box = &mut self.boxes[index];
-            let value = event.data().unwrap_or_default();
+        if let Some(attached) = &self.attached {
+            let mut shape = attached.lock().unwrap();
+            if let Some(tb) = shape.as_any_mut().downcast_mut::<TextBox>() {
+                let value = event.data().unwrap_or_default();
 
-            active_box.insert_at_cursor(&value);
+                info!("on_input: {}", value);
+                tb.insert_at_cursor(&value);
 
-            // 텍스트의 너비 계산 및 업데이트
-            let text_width = {
-                let text_clone = active_box.text.clone();
-                get_max_line_width(&self.context, &text_clone)
-            };
-            active_box.update_width(text_width);
+                // 텍스트의 너비 계산 및 업데이트
+                let text_width = {
+                    let text_clone = tb.text.clone();
+                    get_max_line_width(&self.context, &text_clone)
+                };
+                tb.update_width(text_width);
+                drop(tb); // Release the mutable borrow before calling redraw
 
-            self.clear_hidden_input();
+                self.clear_hidden_input();
+            }
+
+            drop(shape); // Release the immutable borrow before calling redraw
             self.redraw();
         }
     }
 
     /// 키보드 입력 처리
     pub fn on_keydown(&mut self, event: KeyboardEvent) {
-        if self.is_composing {
+        if self.is_composing || !self.is_active() {
             return; // IME 조합 중에는 keydown 이벤트 무시
         }
 
-        if let Some(index) = self.active_index {
-            let active_box = &mut self.boxes[index];
-            let text_clone = active_box.text.clone();
+        if let Some(attached) = &self.attached {
+            let mut shape = attached.lock().unwrap();
+            if let Some(tb) = shape.as_any_mut().downcast_mut::<TextBox>() {
+                let text_clone = tb.text.clone();
+                match event.key().as_str() {
+                    "Backspace" => {
+                        tb.delete_before_cursor();
+                        let text_width = get_max_line_width(&self.context, &text_clone);
+                        tb.update_width(text_width);
+                        let height = tb.get_height(&tb.text);
+                        tb.update_height(height);
+                    }
+                    "Delete" => {
+                        tb.delete_at_cursor();
+                        let text_width = get_max_line_width(&self.context, &text_clone);
+                        tb.update_width(text_width);
+                        let height = tb.get_height(&tb.text);
+                        tb.update_height(height);
+                    }
+                    "Enter" => {
+                        tb.insert_at_cursor("\n");
+                        info!("Enter: {},{}", tb.text, tb.cursor_position);
 
-            match event.key().as_str() {
-                "Backspace" => {
-                    active_box.delete_before_cursor();
-                    let text_width = get_max_line_width(&self.context, &text_clone);
-                    active_box.update_width(text_width);
-                    active_box.update_height(active_box.get_height(&active_box.text));
-                    self.redraw();
+                        // ✅ TextBox 높이 증가 (줄 개수에 맞게)
+                        let height = tb.get_height(&tb.text);
+                        tb.update_height(height);
+                        let max_line_width = get_max_line_width(&self.context, &tb.text);
+                        tb.update_width(max_line_width);
+                    }
+                    "ArrowLeft" => {
+                        tb.move_cursor_left();
+                    }
+                    "ArrowRight" => {
+                        tb.move_cursor_right();
+                    }
+                    "ArrowUp" =>{
+                        tb.move_cursor_up();
+                    }
+                    "ArrowDown" =>{
+                        tb.move_cursor_down();
+                    }
+                    "Home" =>{
+                        tb.move_cursor_to_line_start();
+                    }
+                    "End" =>{
+                        tb.move_cursor_to_line_end();
+                    }
+                    "Escape" => {
+                        drop(tb); // Release the mutable borrow before calling finish_input
+                        drop(shape); // Release the mutable borrow before calling finish_input
+                        self.finish_input();
+                        return;
+                    }
+                    _ => {}
                 }
-                "Delete" => {
-                    active_box.delete_at_cursor();
-                    let text_width = get_max_line_width(&self.context, &text_clone);
-                    active_box.update_width(text_width);
-                    active_box.update_height(active_box.get_height(&active_box.text));
-                    self.redraw();
-                }
-                "Enter" => {
-                    active_box.insert_at_cursor("\n");
-                    info!("Enter: {},{}", active_box.text,active_box.cursor_position);
 
-                    // ✅ TextBox 높이 증가 (줄 개수에 맞게)
-                    active_box.update_height(active_box.get_height(&active_box.text));
-                    active_box.update_width(get_max_line_width(&self.context, &active_box.text));
-                    
-                    self.redraw();
-                }
-                "ArrowLeft" => {
-                    active_box.move_cursor_left();
-                    self.redraw();
-                }
-                "ArrowRight" => {
-                    active_box.move_cursor_right();
-                    self.redraw();
-                }
-                "ArrowUp" =>{
-                    active_box.move_cursor_up();
-                    self.redraw();
-                }
-                "ArrowDown" =>{
-                    active_box.move_cursor_down();
-                    self.redraw();
-                }
-                "Home" =>{
-                    active_box.move_cursor_to_line_start();
-                    self.redraw();
-                }
-                "End" =>{
-                    active_box.move_cursor_to_line_end();
-                    self.redraw();
-                }
-                "Escape" => {
-                    self.finish_input();
-                }
-                _ => {}
+                drop(tb); // Release the mutable borrow before calling redraw 
             }
+
+            drop(shape);
+            self.redraw();
         }
     }
 
@@ -227,7 +266,7 @@ impl TextBoxManager {
 
     /// 커서 표시 여부를 토글한다.
     pub fn toggle_cursor(&mut self) {
-        if self.active_index.is_none() {
+        if !self.is_active() {
             return;
         }
         self.cursor_visible = !self.cursor_visible;
@@ -235,43 +274,40 @@ impl TextBoxManager {
     }
 
     fn redraw(&mut self) {
+        if !self.is_active() {
+            return;
+        }
         //self.context.clear_rect(0.0, 0.0, 800.0, 600.0);
         self.context.set_font("20px sans-serif");
 
-        for (i, box_) in self.boxes.iter_mut().enumerate() {
-            if self.active_index == Some(i) {
-                let byte_index = box_.get_byte_index_at_cursor();
-                let text_before_cursor = &box_.text[..byte_index];
-                let text_after_cursor = &box_.text[byte_index..];
-                let text_to_draw = format!("{}{}{}", text_before_cursor, box_.composition_text, text_after_cursor);
-                box_.update_width(get_max_line_width(&self.context, &text_to_draw));
-            }
+        if let Some(attached) = &self.attached {
+            let mut shape = attached.lock().unwrap();
+            if let Some(tb) = shape.as_any_mut().downcast_mut::<TextBox>() {
 
-            box_.draw(&self.context, 1.0);
+                let byte_index = tb.get_byte_index_at_cursor();
+                let text_before_cursor = &tb.text[..byte_index];
+                let text_after_cursor = &tb.text[byte_index..];
+                let text_to_draw = format!("{}{}{}", text_before_cursor, tb.composition_text, text_after_cursor);
+                info!("redraw: {}", text_to_draw);
+                tb.update_width(get_max_line_width(&self.context, &text_to_draw));
 
-            // 커서 및 조합 중인 글자 강조 표시
-            if self.active_index == Some(i) {
-                let byte_index = box_.get_byte_index_at_cursor();
-                let text_before_cursor = &box_.text[..byte_index];
-                let text_after_cursor = &box_.text[byte_index..];
-                let text_to_draw = format!("{}{}{}", text_before_cursor, box_.composition_text, text_after_cursor);
+                tb.draw(&self.context, 1.0);
 
-                let cursor_x = get_text_width(&self.context, &text_to_draw[..box_.get_byte_index_at_cursor()]) + box_.position.x + 5.0;
-                let cursor_y = box_.position.y + 5.0 + (text_to_draw[..box_.get_byte_index_at_cursor()].matches('\n').count() as f64) * (box_.get_font_size() + box_.get_line_gap());
-                if self.is_composing && !box_.composition_text.is_empty() {
+                // 커서 및 조합 중인 글자 강조 표시
+                let cursor_x = get_text_width(&self.context, &text_to_draw[..tb.get_byte_index_at_cursor()]) + tb.position.x + 5.0;
+                let cursor_y = tb.position.y + 5.0 + (text_to_draw[..tb.get_byte_index_at_cursor()].matches('\n').count() as f64) * (tb.get_font_size() + tb.get_line_gap());
+                if self.is_composing && !tb.composition_text.is_empty() {
                     // 조합 중인 글자에 파란색 박스 표시
-                    let cursor_width = get_text_width(&self.context, &box_.composition_text);
-                    let cursor_height = box_.get_font_size() + box_.get_line_gap();
+                    let cursor_width = get_text_width(&self.context, &tb.composition_text);
+                    let cursor_height = tb.get_font_size() + tb.get_line_gap();
                     self.context.set_fill_style(&"rgba(0, 0, 255, 0.3)".into()); // ✅ 반투명한 파란색 (alpha = 0.3)
                     self.context.fill_rect(cursor_x, cursor_y, cursor_width, cursor_height);
                 }else if self.cursor_visible {
                     self.context.set_fill_style(&"blue".into());
-                    self.context.fill_rect(cursor_x, cursor_y, 2.0, box_.get_font_size() + box_.get_line_gap());
+                    self.context.fill_rect(cursor_x, cursor_y, 2.0, tb.get_font_size() + tb.get_line_gap());
                 }
 
                 self.context.set_stroke_style(&"blue".into());
-            } else {
-                self.context.set_stroke_style(&"gray".into());
             }
         }
     }
@@ -333,6 +369,7 @@ pub struct TextBox{
     line_gap: f64,
     pub width: f64,
     height: f64,
+    selected_control_point: i32,
     pub composition_text: String,
     pub cursor_position: usize,
 }
@@ -352,14 +389,15 @@ impl TextBox{
             , line_gap: 5.0
             , width: 50.0
             , height: 30.0
+            , selected_control_point: -1
             , composition_text: String::new()
             , cursor_position: 0}
     }
 
     fn control_points(&self) -> Vec<Point2D>{
         let control_pts = vec![
-            Point2D::new(self.position.x, self.position.y) ,
-            Point2D::new(self.position.x, self.position.y - 30.0)
+            Point2D::new(self.position.x + self.width * 0.5, self.position.y + self.height * 0.5) ,
+            Point2D::new(self.position.x + self.width * 0.5, self.position.y - 30.0)
             ];
 
         control_pts
@@ -615,6 +653,14 @@ impl Shape for TextBox{
         control_pts.iter().position(|p| (x - p.x).powi(2) + (y - p.y).powi(2) < adjusted_width).map_or(-1, |i| i as i32)
     }
 
+    fn get_selected_control_point(&self) -> i32 {
+        self.selected_control_point
+    }
+
+    fn set_selected_control_point(&mut self, index: i32) {
+        self.selected_control_point = index;
+    }
+
     fn is_selected(&self) -> bool {
         self.selected
     }
@@ -715,7 +761,7 @@ impl Shape for TextBox{
         context.save();
 
         let control_pts = self.control_points();
-        context.set_fill_style(&"#29B6F2".into()); // Red control points
+        context.set_fill_style(&"#29B6F2".into()); // control points
         for point in control_pts{
             context.fill_rect(point.x - adjusted_width, point.y - adjusted_width, adjusted_width * 2.0, adjusted_width * 2.0);
         }

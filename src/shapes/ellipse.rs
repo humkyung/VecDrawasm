@@ -31,12 +31,25 @@ pub struct Ellipse{
     color: String,
     line_width: f64,
     axis_x: Vector2D,
-    axis_y: Vector2D
+    axis_y: Vector2D,
+    selected_control_point: i32
 }
 impl Ellipse{
     pub fn new(center: Point2D, rx: f64, ry: f64, rotation: f64, start_angle: f64, end_angle: f64, color: String, line_width: f64) -> Self {
-        Ellipse{center, radius_x: rx, radius_y: ry, rotation: rotation, start_angle: start_angle, end_angle: end_angle, selected: false, hovered: false, color, line_width
-            , axis_x: Vector2D::AXIS_X, axis_y: Vector2D::AXIS_Y}
+        Ellipse{
+            center, 
+            radius_x: rx, 
+            radius_y: ry, 
+            rotation: rotation, 
+            start_angle: start_angle, 
+            end_angle: end_angle, 
+            selected: false, 
+            hovered: false, 
+            color, 
+            line_width , 
+            axis_x: Vector2D::AXIS_X, 
+            axis_y: Vector2D::AXIS_Y,
+            selected_control_point: -1}
     }
 
     fn control_points(&self) -> Vec<Point2D>{
@@ -108,6 +121,14 @@ impl Shape for Ellipse{
 
         let adjusted_width = (10.0 / scale).powi(2);
         control_pts.iter().position(|p| (x - p.x).powi(2) + (y - p.y).powi(2) < adjusted_width).map_or(-1, |i| i as i32)
+    }
+
+    fn get_selected_control_point(&self) -> i32 {
+        self.selected_control_point
+    }
+
+    fn set_selected_control_point(&mut self, index: i32) {
+        self.selected_control_point = index;
     }
 
     fn is_selected(&self) -> bool {

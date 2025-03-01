@@ -27,15 +27,21 @@ pub struct Rectangle{
     center: Point2D,
     width: f64,
     height: f64,
-    rotation: f64,  // in radian
+    rotation: f64,  // in radian,
+    selected_control_point: i32,
 }
 impl Rectangle{
     pub fn new(color: String, line_width: f64, start: Point2D, w: f64, h: f64) -> Self {
-        Rectangle{selected: false, hovered: false, color, line_width, 
+        Rectangle{
+            selected: false, 
+            hovered: false, 
+            color, 
+            line_width, 
             center: Point2D::new(start.x + w * 0.5, start.y + h * 0.5), 
             width: w, 
             height: h, 
-            rotation: 0.0}
+            rotation: 0.0,
+            selected_control_point: -1}
     }
 
     fn control_points(&self) -> Vec<Point2D>{
@@ -106,6 +112,7 @@ impl Shape for Rectangle{
         true
     }
 
+    /// Get the index of the control point that is hit by the mouse cursor.
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
         let mut control_pts = self.control_points();
         for pt in &mut control_pts{
@@ -117,6 +124,14 @@ impl Shape for Rectangle{
 
         let adjusted_width = (10.0 / scale).powi(2);
         control_pts.iter().position(|p| (x - p.x).powi(2) + (y - p.y).powi(2) < adjusted_width).map_or(-1, |i| i as i32)
+    }
+
+    fn get_selected_control_point(&self) -> i32 {
+        self.selected_control_point
+    }
+
+    fn set_selected_control_point(&mut self, index: i32) {
+        self.selected_control_point = index;
     }
 
     fn is_selected(&self) -> bool {

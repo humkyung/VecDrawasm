@@ -26,10 +26,18 @@ pub struct Line{
     line_width: f64,
     start: Point2D,
     end: Point2D,
+    selected_control_point: i32,
 }
 impl Line {
     pub fn new(color: String, line_width: f64, start: Point2D, end: Point2D) -> Self {
-        Line {selected: false, hovered: false, color, line_width, start, end}
+        Line {
+            selected: false, 
+            hovered: false, 
+            color, 
+            line_width, 
+            start, 
+            end,
+            selected_control_point: -1,}
     }
 }
 
@@ -80,6 +88,14 @@ impl Shape for Line{
         if dx * dx + dy * dy < adjusted_width * adjusted_width { return 1; }
 
         -1
+    }
+
+    fn get_selected_control_point(&self) -> i32 {
+        self.selected_control_point
+    }
+
+    fn set_selected_control_point(&mut self, index: i32) {
+        self.selected_control_point = index;
     }
 
     fn is_selected(&self) -> bool {
