@@ -279,4 +279,20 @@ impl VecDrawDoc {
         ctx.line_to(width / 2.0, height);
         ctx.stroke();
     }
+
+    // shape들을 svg 문자열로 반환한다.
+    pub fn to_svg(&self) -> String{
+        let bound_rect = self.bounding_rect().unwrap();
+        let width = bound_rect.width();
+        let height = bound_rect.height();
+        let mut svg_content = String::from(format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}">"#));
+
+        self.shapes.iter().for_each(|shape|{
+            let svg = shape.lock().unwrap().to_svg();
+            svg_content.push_str(&svg);
+        });
+        svg_content.push_str("</svg>");
+
+        svg_content
+    }
 }

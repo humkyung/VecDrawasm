@@ -204,6 +204,10 @@ impl Shape for Pencil{
         context.stroke_styled(rect, &Color::RED, adjusted_width, &stroke_style);
     }
 
+    fn to_svg(&self) -> String{
+        "".to_string()
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

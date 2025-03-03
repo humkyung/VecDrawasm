@@ -302,6 +302,16 @@ impl Shape for Rectangle{
 
     }
 
+    fn to_svg(&self) -> String{
+        format!(
+                r#"<rect x="{x}" y="{y}" width="{width}" height="{height}" fill="{color}"/>"#,
+                x = self.center.x - self.width,
+                y = self.center.y - self.height,
+                width = self.width,
+                height = self.height,
+                color = self.color)
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

@@ -812,6 +812,10 @@ impl Shape for TextBox{
         }
     }
 
+    fn to_svg(&self) -> String{
+        "".to_string()
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

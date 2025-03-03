@@ -288,6 +288,10 @@ impl Shape for Ellipse{
         context.fill(cirlce, &color);
     }
 
+    fn to_svg(&self) -> String{
+        "".to_string()
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

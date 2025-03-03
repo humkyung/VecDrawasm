@@ -6,7 +6,8 @@ use shapes::shape::Shape;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::console::clear;
-use web_sys::{window, CanvasRenderingContext2d, HtmlElement, HtmlCanvasElement, HtmlInputElement, MouseEvent, WheelEvent, KeyboardEvent, CompositionEvent, InputEvent};
+use web_sys::{window, CanvasRenderingContext2d, HtmlElement, HtmlCanvasElement, HtmlInputElement, MouseEvent, WheelEvent, KeyboardEvent, CompositionEvent,
+     InputEvent, Blob, Url, HtmlAnchorElement};
 use log::info;
 
 use std::cell::RefCell;
@@ -1030,4 +1031,29 @@ where
     canvas.add_event_listener_with_callback(event_type, closure.as_ref().unchecked_ref())?;
     closure.forget();
     Ok(())
+}
+
+#[wasm_bindgen]
+pub fn download_svg(filename: &str) {
+
+    let instance = VecDrawDoc::instance();
+    let doc = instance.lock().unwrap();
+    let svg_content = doc.to_svg();
+
+    let blob = Blob::new_with_str_sequence(&wasm_bindgen::JsValue::from(svg_content))
+        .expect("Failed to create Blob");
+    
+    let url = Url::create_object_url_with_blob(&blob).expect("Failed to create URL");
+
+    let document = window().unwrap().document().unwrap();
+    let a = document.create_element("a").unwrap().dyn_into::<HtmlAnchorElement>().unwrap();
+    a.set_href(&url);
+    a.set_download(filename);
+    a.style().set_property("display", "none").unwrap();
+
+    document.body().unwrap().append_child(&a).unwrap();
+    a.click();
+    document.body().unwrap().remove_child(&a).unwrap();
+    
+    Url::revoke_object_url(&url).expect("Failed to revoke URL");
 }

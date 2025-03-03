@@ -184,6 +184,10 @@ impl Shape for Line{
         context.fill(rect, &Color::RED);
     }
 
+    fn to_svg(&self) -> String{
+        "".to_string()
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
