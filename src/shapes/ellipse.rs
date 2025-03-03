@@ -16,7 +16,7 @@ use web_sys::console::info;
 use web_sys::{window, CanvasRenderingContext2d};
 
 use piet::{RenderContext, Color, StrokeStyle};
-use kurbo::Affine;
+use kurbo::{Affine, Point};
 
 use crate::state::State;
 use super::geometry::Vector2D;
@@ -57,7 +57,7 @@ impl Ellipse{
             selected_control_point: -1}
     }
 
-    fn control_points(&self) -> Vec<Point2D>{
+    fn control_points(&self, scale: f64) -> Vec<Point2D>{
         let control_pts = vec![
             Point2D::new(self.center.x - self.radius_x, self.center.y - self.radius_y), 
             Point2D::new(self.center.x - self.radius_x, self.center.y),
@@ -67,7 +67,7 @@ impl Ellipse{
             Point2D::new(self.center.x + self.radius_x, self.center.y),
             Point2D::new(self.center.x + self.radius_x, self.center.y - self.radius_y),
             Point2D::new(self.center.x, self.center.y - self.radius_y),
-            Point2D::new(self.center.x, self.center.y - self.radius_y - 30.0)
+            Point2D::new(self.center.x, self.center.y - self.radius_y - 30.0 / scale)
             ];
 
         control_pts
@@ -116,7 +116,7 @@ impl Shape for Ellipse{
     }
 
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
-        let mut control_pts = self.control_points();
+        let mut control_pts = self.control_points(scale);
         for pt in &mut control_pts{
             let mut dir = Vector2D::from_points(self.center, *pt);
             dir.rotate_by(self.rotation);
@@ -154,7 +154,7 @@ impl Shape for Ellipse{
     }
 
     fn move_control_point_by(&mut self, index: i32, dx: f64, dy: f64) {
-        let mut control_pts = self.control_points();
+        let mut control_pts = self.control_points(1.0);
         for pt in &mut control_pts{
             let mut dir = Vector2D::from_points(self.center, *pt);
             dir.rotate_by(self.rotation);
@@ -253,7 +253,7 @@ impl Shape for Ellipse{
 
         let color = hex_to_color("#29B6F2");
 
-        let control_pts = self.control_points();
+        let control_pts = self.control_points(scale);
         for point in control_pts{
             let rect = piet::kurbo::Rect::new(point.x - adjusted_width, point.y - adjusted_width,
                 point.x + adjusted_width, point.y + adjusted_width);

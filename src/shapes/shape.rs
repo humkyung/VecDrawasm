@@ -12,6 +12,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use piet::{RenderContext, Color, Text, TextLayout, TextLayoutBuilder, ImageFormat};
+use kurbo::{Point};
 
 use web_sys::console::group;
 use web_sys::console::info;

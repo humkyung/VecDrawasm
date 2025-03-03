@@ -9,6 +9,7 @@ use web_sys::{window, CanvasRenderingContext2d, HtmlElement, HtmlCanvasElement, 
 use log::info;
 
 use std::cell::RefCell;
+use std::f64::consts::PI;
 use std::rc::Rc;
 use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex};
@@ -26,10 +27,12 @@ mod shapes{
     pub mod pencil;
     pub mod rectangle;
     pub mod ellipse;
+    pub mod elliptical_arc;
     pub mod text_box;
 }
 use crate::shapes::geometry::{Point2D, Vector2D};
-use crate::shapes::{pencil::Pencil, line::Line, rectangle::Rectangle, ellipse::Ellipse, text_box::TextBox, text_box::TextBoxManager};
+use crate::shapes::{pencil::Pencil, line::Line, rectangle::Rectangle, ellipse::Ellipse, elliptical_arc::EllipticalArc,
+     text_box::TextBox, text_box::TextBoxManager};
 
 pub mod state;
 use crate::state::State;
@@ -97,6 +100,11 @@ pub fn start() -> Result<(), JsValue> {
             let mut doc = instance.lock().unwrap();
 
             /*
+            let arc = EllipticalArc::new(Point2D::new(100.0, 100.0), 100.0, 50.0,
+            0.0, 0.0,
+            PI * 0.5, state.borrow().color().to_string(),
+            state.borrow().line_width());
+            doc.add_shape(Box::new(arc)); 
             let seed = js_sys::Math::random() as u64; // JS의 랜덤 함수를 이용해 시드 생성
             let mut rng = StdRng::seed_from_u64(seed); // 매번 다른 시드를 사용
             for i in 0..1000{
@@ -112,7 +120,6 @@ pub fn start() -> Result<(), JsValue> {
                 doc.add_shape(Box::new(line)); 
             }
             */
-
             PIET_CTX.with(|ctx|{
                 if let Some(ref mut ctx) = *ctx.borrow_mut() {
                     doc.draw(&canvas, &mut ctx.borrow_mut(), &state.borrow());
@@ -197,7 +204,9 @@ pub fn start() -> Result<(), JsValue> {
                         shape.set_selected(true);
                     });
 
-                    doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
+                    if selection_changed{
+                        doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
+                    }
                 }
                 else if state.borrow().action_mode() == &state::ActionMode::Drawing{
                     let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
@@ -481,14 +490,14 @@ pub fn start() -> Result<(), JsValue> {
                         }
                         DrawingMode::Text =>{ }
                     }
+
+                    let instance = VecDrawDoc::instance();
+                    let doc = instance.lock().unwrap();
+                    doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
                 }
 
                 mouse_context_points.borrow_mut().clear();
                 state.borrow_mut().set_world_coord(Point::new(current_x, current_y));
-
-                let instance = VecDrawDoc::instance();
-                let doc = instance.lock().unwrap();
-                doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
             });
         })?;
     }
