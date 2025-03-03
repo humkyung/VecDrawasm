@@ -11,8 +11,8 @@ use wasm_bindgen::convert::FromWasmAbi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use piet::{RenderContext, Color, Text, TextLayout, StrokeStyle};
-use kurbo::Affine;
+use piet::{RenderContext, Color, StrokeStyle};
+use kurbo::{Affine, Point};
 
 use web_sys::console::group;
 use web_sys::console::info;
@@ -20,7 +20,8 @@ use web_sys::{window, CanvasRenderingContext2d, Element, DomParser, CanvasGradie
 use svgtypes::Transform;
 
 use crate::state::State;
-use super::geometry::{Point2D, Vector2D};
+use super::geometry::{Point2D, Vector2D, BoundingRect2D};
+use super::shape::convert_to_color;
 use super::shape::{Shape, hex_to_color};
 
 #[derive(Debug, Clone)]
@@ -28,16 +29,18 @@ pub struct Pencil{
     selected: bool,
     hovered: bool,
     color: String,
+    background: Option<String>,
     line_width: f64,
     points: Vec<Point2D>,
     selected_control_point: i32,
 }
 impl Pencil{
-    pub fn new(color: String, line_width: f64, points: Vec<Point2D>) -> Self {
+    pub fn new(points: Vec<Point2D>, color: String, line_width: f64, background: Option<String>) -> Self {
         Pencil{
             selected: false, 
             hovered: false, 
             color, 
+            background,
             line_width, 
             points,
             selected_control_point: -1,}
@@ -66,6 +69,10 @@ impl Shape for Pencil{
         self.points.iter().fold(Point2D::new(f64::MAX, f64::MAX), |acc, point| 
             Point2D::new(acc.x.min(point.x), acc.y.min(point.y))
         )
+    }
+
+    fn bounding_rect(&self) -> super::geometry::BoundingRect2D {
+        BoundingRect2D { min: self.min_point(), max: self.max_point() }
     }
 
     fn is_hit(&self, x: f64, y: f64, scale: f64) -> bool {
@@ -130,18 +137,33 @@ impl Shape for Pencil{
         }
     }
 
+    // 자유 곡선을 그린다.
     fn draw(&self, context: &mut WebRenderContext, scale: f64){
         let mut color = hex_to_color(&self.color);
         if self.hovered{
             color = Color::RED;
         }
 
+        let mut stroke_style = StrokeStyle::new();
+        stroke_style.set_line_cap(piet::LineCap::Round);
+        stroke_style.set_line_join(piet::LineJoin::Bevel);
+
         let adjusted_width = self.line_width / scale;
-        if let Some(mut start) = self.points.first() {
+        if let Some(start) = self.points.first() {
+            let mut path = piet::kurbo::BezPath::new();
+            path.move_to(Point::new(start.x, start.y));
+
             for point in self.points.iter().skip(1) {
-                let line = piet::kurbo::Line::new((start.x, start.y), (point.x, point.y));
-                context.stroke(line, &color, adjusted_width);
-                start = point;
+                path.line_to(Point::new(point.x, point.y));
+            }
+            if let Some(ref background) = self.background{
+                path.close_path();
+
+                context.fill(path.clone(), &convert_to_color(&background));
+                context.stroke_styled(path, &color, adjusted_width, &stroke_style);
+            }
+            else{
+                context.stroke_styled(path, &color, adjusted_width, &stroke_style);
             }
         }
 
@@ -149,7 +171,7 @@ impl Shape for Pencil{
     }   
 
     fn draw_xor(&self, context: &mut WebRenderContext, state: &State){
-        context.save();
+        let _ = context.save();
 
         // 줌 및 팬 적용 (기존의 scale과 offset 유지)
         let scale = state.scale();
@@ -158,7 +180,7 @@ impl Shape for Pencil{
 
         self.draw(context, scale);
 
-        context.restore();
+        let _ = context.restore();
     }
 
     fn draw_control_points(&self, context: &mut WebRenderContext, scale: f64) {

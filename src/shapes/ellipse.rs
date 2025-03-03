@@ -19,8 +19,10 @@ use piet::{RenderContext, Color, StrokeStyle};
 use kurbo::{Affine, Point};
 
 use crate::state::State;
+use super::geometry::BoundingRect2D;
 use super::geometry::Vector2D;
 use super::geometry::{Point2D};
+use super::shape::convert_to_color;
 use super::shape::{Shape, hex_to_color};
 
 #[derive(Debug, Clone)]
@@ -34,13 +36,14 @@ pub struct Ellipse{
     selected: bool,
     hovered: bool,
     color: String,
+    background: Option<String>,
     line_width: f64,
     axis_x: Vector2D,
     axis_y: Vector2D,
     selected_control_point: i32
 }
 impl Ellipse{
-    pub fn new(center: Point2D, rx: f64, ry: f64, rotation: f64, start_angle: f64, end_angle: f64, color: String, line_width: f64) -> Self {
+    pub fn new(center: Point2D, rx: f64, ry: f64, rotation: f64, start_angle: f64, end_angle: f64, color: String, line_width: f64, background: Option<String>) -> Self {
         Ellipse{
             center, 
             radius_x: rx, 
@@ -51,6 +54,7 @@ impl Ellipse{
             selected: false, 
             hovered: false, 
             color, 
+            background,
             line_width , 
             axis_x: Vector2D::AXIS_X, 
             axis_y: Vector2D::AXIS_Y,
@@ -100,6 +104,10 @@ impl Shape for Ellipse{
 
     fn min_point(&self) -> Point2D{
         Point2D::new(self.center.x - self.radius_x, self.center.y - self.radius_y)
+    }
+
+    fn bounding_rect(&self) -> super::geometry::BoundingRect2D {
+        BoundingRect2D { min: self.min_point(), max: self.max_point() }
     }
 
     fn is_hit(&self, x: f64, y: f64, scale: f64) -> bool {
@@ -230,6 +238,9 @@ impl Shape for Ellipse{
         let center = piet::kurbo::Point::new(self.center.x, self.center.y);
         let radii = piet::kurbo::Vec2::new(self.radius_x, self.radius_y);
         let ellipse = piet::kurbo::Ellipse::new(center, radii, self.rotation);
+        if let Some(ref background_color) = self.background {
+            context.fill(ellipse, &convert_to_color(background_color));
+        }
         context.stroke(ellipse, &color, adjusted_width);
         
         if self.selected{ self.draw_control_points(context, scale);}

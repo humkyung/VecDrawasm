@@ -19,8 +19,7 @@ use piet::{RenderContext, Color, StrokeStyle, Text, TextLayout, TextLayoutBuilde
 use kurbo::Affine;
 
 use crate::state::State;
-use super::geometry::Vector2D;
-use super::geometry::{Point2D};
+use super::geometry::{Point2D, Vector2D, BoundingRect2D};
 use super::shape::hex_to_color;
 use super::shape::Shape;
 
@@ -80,6 +79,10 @@ impl Shape for Line{
 
     fn min_point(&self) -> Point2D{
         Point2D::new(self.start.x.min(self.end.x), self.start.y.min(self.end.y))
+    }
+
+    fn bounding_rect(&self) -> super::geometry::BoundingRect2D {
+        BoundingRect2D { min: self.min_point(), max: self.max_point() }
     }
 
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
@@ -145,7 +148,7 @@ impl Shape for Line{
 
         // Define stroke style
         let mut stroke_style = StrokeStyle::new();
-        stroke_style.set_dash_pattern([10.0 / scale, 5.0 / scale]); // Dashed line pattern
+        //stroke_style.set_dash_pattern([10.0 / scale, 5.0 / scale]); // Dashed line pattern
         stroke_style.set_line_cap(piet::LineCap::Round);
         stroke_style.set_line_join(piet::LineJoin::Bevel);
 
@@ -159,7 +162,7 @@ impl Shape for Line{
 
     // XOR로 그리기
     fn draw_xor(&self, context: &mut WebRenderContext, state: &State){
-        context.save();
+        let _ = context.save();
 
         // 줌 및 팬 적용 (기존의 scale과 offset 유지)
         let scale = state.scale();
@@ -169,7 +172,7 @@ impl Shape for Line{
 
         self.draw(context, scale);
 
-        context.restore();
+        let _ = context.restore();
     }
 
     /// Draw control points

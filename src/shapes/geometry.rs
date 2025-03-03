@@ -1,5 +1,7 @@
 use std::ops::{self, Add, AddAssign, Mul};
 
+use kurbo::Point;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Point2D{
     pub x: f64,
@@ -35,6 +37,14 @@ impl AddAssign<Vector2D> for Point2D{
     fn add_assign(&mut self, rhs: Vector2D) {
         self.x += rhs.x;
         self.y += rhs.y;
+    }
+}
+
+impl Mul<f64> for Point2D{
+    type Output = Self;
+
+    fn mul(self, other: f64) -> Self{
+        Self{x: self.x * other, y: self.y * other}
     }
 }
 
@@ -107,5 +117,68 @@ impl Mul<f64> for Vector2D{
 
     fn mul(self, other: f64) -> Self{
         Self{x: self.x * other, y: self.y * other}
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BoundingRect2D{
+    pub min: Point2D,
+    pub max: Point2D
+}
+impl BoundingRect2D{
+    pub fn new(min: Point2D, max: Point2D) -> Self {
+        BoundingRect2D{min, max}
+    }
+
+    // Point Vector에서 BoundingRect를 반환한다.
+    pub fn from_points(points: Vec<Point2D>) -> Self{
+        let mut min = points[0];
+        let mut max = points[0];
+        points.iter().skip(1).for_each(|point| {
+            if min.x > point.x { min.x = point.x;}
+            if min.y > point.y { min.y = point.y;}
+            if max.x < point.x { max.x = point.x;}
+            if max.y < point.y { max.y = point.y;}
+        });
+
+        BoundingRect2D{min, max}
+    }
+
+    pub fn min(&self) -> Point2D{
+        self.min
+    }
+
+    pub  fn max(&self) -> Point2D{
+        self.max
+    }
+
+    // BoundingRect의 중점을 리턴한다.
+    pub fn center(&self) -> Point2D{
+        (self.min + self.max) * 0.5
+    }
+
+    pub fn width(&self) -> f64{
+        self.max.x - self.min.x
+    }
+
+    pub fn height(&self) -> f64{
+        self.max.y - self.min.y
+    }
+}
+
+impl Add<BoundingRect2D> for BoundingRect2D{
+    type Output = Self;
+
+    fn add(self, other: BoundingRect2D) -> Self{
+        Self{
+            min: Point2D{x: self.min.x.min(other.min.x), y: self.min.y.min(other.min.y)},
+            max: Point2D{x: self.max.x.max(other.max.x), y: self.max.y.max(other.max.y)},
+        }
+    }
+}
+impl AddAssign<BoundingRect2D> for BoundingRect2D{
+    fn add_assign(&mut self, rhs: BoundingRect2D) {
+        self.min = Point2D{x: self.min.x.min(rhs.min.x), y: self.min.y.min(rhs.min.y)};
+        self.min = Point2D{x: self.max.x.max(rhs.max.y), y: self.max.y.max(rhs.max.y)};
     }
 }

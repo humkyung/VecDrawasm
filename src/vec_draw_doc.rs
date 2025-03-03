@@ -25,9 +25,10 @@ use std::thread;
 
 use piet::{RenderContext, Color, Text, TextLayout, TextLayoutBuilder, ImageFormat, StrokeStyle, FontFamily};
 
+use crate::shapes::geometry::BoundingRect2D;
 use crate::shapes::geometry::{Point2D, Vector2D};
 use std::cmp::PartialEq;
-use crate::shapes::shape::{Shape, Svg};
+use crate::shapes::shape::{Shape, convert_to_color};
 use crate::shapes::{pencil::Pencil, line::Line, rectangle::Rectangle, ellipse::Ellipse, text_box::TextBox, text_box::TextBoxManager};
 
 use crate::state::State;
@@ -91,6 +92,21 @@ impl VecDrawDoc {
         self.shapes.get(index).cloned()
     }
 
+    /// 모든 shape들을 포함하는 BoundingRect를 반환한다.
+    pub fn bounding_rect(&self) -> Option<BoundingRect2D>{
+        let mut res: Option<BoundingRect2D> = None; 
+        self.shapes.iter().for_each(|shape|{
+            let shape_rect = shape.lock().unwrap().bounding_rect();
+            if res.is_some() {
+                res = Some(res.unwrap() + shape_rect);
+            } else {
+                res = Some(shape_rect);
+            }
+        });
+
+        res
+    }
+
     /*
         마우스 커서 아래에 있는 Shape의 인덱스를 리턴한다.
     */
@@ -133,7 +149,7 @@ impl VecDrawDoc {
         // 잔상 방지를 위해 전체 캔버스를 리셋
         context.transform(Affine::new([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])); // 변환 초기화
         let rect = piet::kurbo::Rect::new(0.0, 0.0, canvas_width, canvas_height);
-        context.clear(rect, self.hex_to_color(state.fill_color())); // 전체 캔버스 지우기
+        context.clear(rect, convert_to_color(state.fill_color())); // 전체 캔버스 지우기
 
         self.draw_ruler(context, canvas_width, canvas_height, state.world_coord());
         //self.draw_grid(&context, canvas_width, canvas_height, state.scale());
@@ -262,17 +278,5 @@ impl VecDrawDoc {
         ctx.move_to(width / 2.0, 0.0);
         ctx.line_to(width / 2.0, height);
         ctx.stroke();
-    }
-
-    fn hex_to_color(&self, hex: &str) -> Color {
-        let hex = hex.trim_start_matches('#');
-        if hex.len() == 6 {
-            let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
-            let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
-            let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
-            Color::rgb8(r, g, b)
-        } else {
-            Color::BLACK // Default fallback color
-        }
     }
 }

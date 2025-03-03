@@ -1,77 +1,76 @@
 use std::any::Any;
 use std::collections::HashMap;
-use std::f64::consts::PI;
 use std::f64::MAX;
 use std::iter::Scan;
 use std::str;
+use std::sync::Arc;
 use std::task::Context;
 use std::thread::panicking;
-use js_sys::Intl::get_canonical_locales;
 use log::info;
 use piet_web::WebRenderContext;
 use wasm_bindgen::convert::FromWasmAbi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use web_sys::{CanvasRenderingContext2d};
+use web_sys::console::group;
+use web_sys::console::info;
+use web_sys::{window, CanvasRenderingContext2d};
 
 use piet::{RenderContext, Color, StrokeStyle};
-use kurbo::Affine;
+use kurbo::{Affine, Point, Vec2};
 
 use crate::state::State;
 use super::geometry::{Point2D, Vector2D, BoundingRect2D};
-use super::shape::{Shape, convert_to_color};
+use super::shape::{Shape, hex_to_color};
 
 #[derive(Debug, Clone)]
-pub struct Rectangle{
+pub struct EllipticalArc{
+    center: Point2D,
+    radius_x: f64,
+    radius_y: f64,
+    rotation: f64,
+    start_angle: f64,
+    end_angle: f64,
     selected: bool,
     hovered: bool,
     color: String,
     line_width: f64,
-    background: Option<String>,
-    center: Point2D,
-    width: f64,
-    height: f64,
-    rotation: f64,  // in radian,
-    selected_control_point: i32,
+    axis_x: Vector2D,
+    axis_y: Vector2D,
+    selected_control_point: i32
 }
-impl Rectangle{
-    pub fn new(start: Point2D, w: f64, h: f64, color: String, line_width: f64, background: Option<String>) -> Self {
-        Rectangle{
+impl EllipticalArc{
+    pub fn new(center: Point2D, rx: f64, ry: f64, rotation: f64, start_angle: f64, end_angle: f64, color: String, line_width: f64) -> Self {
+        EllipticalArc{
+            center, 
+            radius_x: rx, 
+            radius_y: ry, 
+            rotation: rotation, 
+            start_angle: start_angle, 
+            end_angle: end_angle, 
             selected: false, 
             hovered: false, 
             color, 
-            line_width, 
-            background,
-            center: Point2D::new(start.x + w * 0.5, start.y + h * 0.5), 
-            width: w, 
-            height: h, 
-            rotation: 0.0,
+            line_width , 
+            axis_x: Vector2D::AXIS_X, 
+            axis_y: Vector2D::AXIS_Y,
             selected_control_point: -1}
     }
 
-    fn control_points(&self, scale: f64) -> Vec<Point2D>{
+    fn control_points(&self) -> Vec<Point2D>{
         let control_pts = vec![
-            Point2D::new(self.center.x - self.width * 0.5, self.center.y - self.height * 0.5), 
-            Point2D::new(self.center.x - self.width * 0.5, self.center.y),
-            Point2D::new(self.center.x - self.width * 0.5, self.center.y + self.height * 0.5),
-            Point2D::new(self.center.x, self.center.y + self.height * 0.5),
-            Point2D::new(self.center.x + self.width * 0.5, self.center.y + self.height * 0.5),
-            Point2D::new(self.center.x + self.width * 0.5, self.center.y),
-            Point2D::new(self.center.x + self.width * 0.5, self.center.y - self.height * 0.5),
-            Point2D::new(self.center.x, self.center.y - self.height * 0.5),
-            Point2D::new(self.center.x, self.center.y),
-            Point2D::new(self.center.x, self.center.y - self.height * 0.5 - 30.0 / scale)
+            Point2D::new(self.center.x - self.radius_x, self.center.y - self.radius_y), 
+            Point2D::new(self.center.x - self.radius_x, self.center.y),
+            Point2D::new(self.center.x - self.radius_x, self.center.y + self.radius_y),
+            Point2D::new(self.center.x, self.center.y + self.radius_y),
+            Point2D::new(self.center.x + self.radius_x, self.center.y + self.radius_y),
+            Point2D::new(self.center.x + self.radius_x, self.center.y),
+            Point2D::new(self.center.x + self.radius_x, self.center.y - self.radius_y),
+            Point2D::new(self.center.x, self.center.y - self.radius_y),
+            Point2D::new(self.center.x, self.center.y - self.radius_y - 30.0)
             ];
-        
-        control_pts
-    }
 
-    fn center_point(&self) -> Point2D{
-        let control_points = self.control_points(1.0);
-        let start = control_points.get(0).unwrap();
-        let end = control_points.get(4).unwrap();
-        Point2D::new((start.x + end.x) * 0.5, (start.y + end.y) * 0.5)
+        control_pts
     }
 
     fn axis_x(&self) -> Vector2D{
@@ -86,8 +85,7 @@ impl Rectangle{
         axis_y
     }
 }
-
-impl Shape for Rectangle{
+impl Shape for EllipticalArc{
     fn color(&self) -> &str {
         &self.color
     }
@@ -97,11 +95,11 @@ impl Shape for Rectangle{
     }
 
     fn max_point(&self) -> Point2D{
-        Point2D::new(self.center.x + self.width * 0.5, self.center.y + self.height * 0.5)
+        Point2D::new(self.center.x + self.radius_x, self.center.y + self.radius_y)
     }
 
     fn min_point(&self) -> Point2D{
-        Point2D::new(self.center.x - self.width * 0.5, self.center.y - self.height * 0.5)
+        Point2D::new(self.center.x - self.radius_x, self.center.y - self.radius_y)
     }
 
     fn bounding_rect(&self) -> super::geometry::BoundingRect2D {
@@ -114,17 +112,15 @@ impl Shape for Rectangle{
 
         let min_pt = self.min_point();
         let max_pt = self.max_point();
-        if x < min_pt.x {return false;}
-        if x > max_pt.x {return false;}
-        if y < min_pt.y {return false;}
-        if y > max_pt.y {return false;}
+
+        if x < min_pt.x || x > max_pt.x {return false;}
+        if y < min_pt.y || y > max_pt.y {return false;}
 
         true
     }
 
-    /// Get the index of the control point that is hit by the mouse cursor.
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
-        let mut control_pts = self.control_points(scale);
+        let mut control_pts = self.control_points();
         for pt in &mut control_pts{
             let mut dir = Vector2D::from_points(self.center, *pt);
             dir.rotate_by(self.rotation);
@@ -148,8 +144,8 @@ impl Shape for Rectangle{
         self.selected
     }
 
-    fn set_selected(&mut self, selected: bool){
-        self.selected = selected;
+    fn set_selected(&mut self, value: bool){
+        self.selected = value;
     }
 
     fn set_hovered(&mut self, value: bool) {
@@ -162,7 +158,7 @@ impl Shape for Rectangle{
     }
 
     fn move_control_point_by(&mut self, index: i32, dx: f64, dy: f64) {
-        let mut control_pts = self.control_points(1.0);
+        let mut control_pts = self.control_points();
         for pt in &mut control_pts{
             let mut dir = Vector2D::from_points(self.center, *pt);
             dir.rotate_by(self.rotation);
@@ -171,10 +167,6 @@ impl Shape for Rectangle{
         }
 
         if index == 8{
-            self.center.x += dx;
-            self.center.y += dy;
-        }
-        else if index == 9{
             if let Some(pt) = control_pts.get_mut(index as usize) {
                 let mut clone = pt.clone();
                 clone.x += dx;
@@ -192,13 +184,13 @@ impl Shape for Rectangle{
                 dir.normalize();
                 let dot = dir.dot(Vector2D::new(dx, dy));
                 self.center += dir * dot * 0.5;
-                self.width += dot;
+                self.radius_x += dot * 0.5;
             } else if index == 3 || index == 7{
                 let mut dir = Vector2D::from_points(self.center,*control_pts.get(index as usize).unwrap() );
                 dir.normalize();
                 let dot = dir.dot(Vector2D::new(dx, dy));
                 self.center += dir * dot * 0.5;
-                self.height += dot;
+                self.radius_y += dot * 0.5;
             }
             else if index == 0 || index == 2 || index == 4 || index == 6{
                 let mut pt = *control_pts.get(index as usize).unwrap();
@@ -226,58 +218,51 @@ impl Shape for Rectangle{
                 }
 
                 let dir = Vector2D::from_points(self.center, pt);
-                self.width = self.axis_x().dot(dir).abs() * 2.0;
-                self.height = self.axis_y().dot(dir).abs() * 2.0;
+                self.radius_x = self.axis_x().dot(dir).abs();
+                self.radius_y = self.axis_y().dot(dir).abs();
             }
         }
     }
 
     fn draw(&self, context: &mut WebRenderContext, scale: f64){
-        let _ = context.save();
-
-        context.transform(Affine::translate((self.center.x, self.center.y)));
-        context.transform(Affine::rotate(self.rotation));
-        context.transform(Affine::translate((-self.center.x, -self.center.y)));
-
-        let mut color = convert_to_color(&self.color);
+        let mut color = hex_to_color(&self.color);
         if self.hovered{
             color = Color::RED;
         }
 
         let adjusted_width = self.line_width / scale;
-        let rect = piet::kurbo::Rect::new(self.center.x - self.width * 0.5, self.center.y - self.height * 0.5,
-            self.center.x + self.width * 0.5 , self.center.y + self.height * 0.5);
-        if let Some(ref background_color) = self.background {
-            context.fill(rect, &convert_to_color(background_color));
-        }
-        context.stroke(rect, &color, adjusted_width);
+
+        let arc= piet::kurbo::Arc::new(
+            Point::new(self.center.x, self.center.y), 
+            Vec2::new(self.radius_x, self.radius_y),
+            self.start_angle, self.end_angle - self.start_angle,
+            0.0
+        );
+    
+        context.stroke(&arc, &color, adjusted_width);
         
         if self.selected{ self.draw_control_points(context, scale);}
-
-        let _ = context.restore();
     }   
 
     fn draw_xor(&self, context: &mut WebRenderContext, state: &State){
-        context.save();
+        let _ = context.save();
 
         // 줌 및 팬 적용 (기존의 scale과 offset 유지)
         let scale = state.scale();
         let offset = state.offset();
-        info!("scale = {}, offset = {:?}", scale, offset);
         context.transform(Affine::new([scale, 0.0, 0.0, scale, offset.x, offset.y]));
 
         self.draw(context, scale);
 
-        context.restore();
+        let _ = context.restore();
     }
 
-    // draw control points and rotation point
     fn draw_control_points(&self, context: &mut WebRenderContext, scale: f64) {
         let adjusted_width = 5.0 / scale;
 
-        let color = convert_to_color("#29B6F2");
+        let color = hex_to_color("#29B6F2");
 
-        let control_pts = self.control_points(scale);
+        let control_pts = self.control_points();
         for point in control_pts{
             let rect = piet::kurbo::Rect::new(point.x - adjusted_width, point.y - adjusted_width,
                 point.x + adjusted_width, point.y + adjusted_width);
@@ -299,7 +284,6 @@ impl Shape for Rectangle{
         let adjusted_width = 5.0 / scale;
         let cirlce = piet::kurbo::Circle::new(piet::kurbo::Point::new(self.center.x, self.center.y), adjusted_width);
         context.fill(cirlce, &color);
-
     }
 
     fn as_any(&self) -> &dyn Any {

@@ -5,6 +5,7 @@ use piet_web::WebRenderContext;
 use shapes::shape::Shape;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use web_sys::console::clear;
 use web_sys::{window, CanvasRenderingContext2d, HtmlElement, HtmlCanvasElement, HtmlInputElement, MouseEvent, WheelEvent, KeyboardEvent, CompositionEvent, InputEvent};
 use log::info;
 
@@ -74,11 +75,6 @@ pub fn start() -> Result<(), JsValue> {
         *ctx.borrow_mut() = Some(piet_ctx.clone());
     });
     
-    let color_picker: HtmlInputElement = document
-        .get_element_by_id("color-picker")
-        .expect("Color picker not found")
-        .dyn_into::<HtmlInputElement>()?;
-
     let line_width_picker = document
         .get_element_by_id("line-width")
         .expect("Line width input not found")
@@ -297,7 +293,8 @@ pub fn start() -> Result<(), JsValue> {
                                 DrawingMode::Pencil =>{
                                     mouse_context_points.borrow_mut().push(Point2D { x: current_x, y: current_y });
 
-                                    let pencil = Pencil::new(state.borrow().color().to_string(), state.borrow().line_width(), mouse_context_points.borrow().clone());
+                                    let pencil = Pencil::new(mouse_context_points.borrow().clone(),
+                                     state.borrow().color().to_string(), state.borrow().line_width(),  state.borrow().background());
                                     pencil.draw_xor(&mut *context_clone.borrow_mut(), &*state.borrow());
                                 }
                                 DrawingMode::Line =>{
@@ -322,7 +319,8 @@ pub fn start() -> Result<(), JsValue> {
                                     let end_point = Point2D::new(current_x, current_y);
                                     let width = end_point.x - start_point.x;
                                     let height = end_point.y - start_point.y;
-                                    let rectangle = Rectangle::new(state.borrow().color().to_string(), state.borrow().line_width(), start_point, width, height);
+                                    let rectangle = Rectangle::new(start_point, width, height, 
+                                        state.borrow().color().to_string(), state.borrow().line_width(), state.borrow().background());
 
                                     let mut ctx = context_clone.borrow_mut(); // Context를 미리 빌려오기
                                     rectangle.draw_xor(&mut *ctx, &*state.borrow());
@@ -342,7 +340,8 @@ pub fn start() -> Result<(), JsValue> {
                                     let width = end_point.x - start_point.x;
                                     let height = end_point.y - start_point.y;
                                     let center = Point2D::new(current_x - width * 0.5, current_y - height * 0.5);
-                                    let ellipse= Ellipse::new(center, width * 0.5, height * 0.5, 0.0, 0.0, std::f64::consts::PI * 2.0, state.borrow().color().to_string(), state.borrow().line_width());
+                                    let ellipse= Ellipse::new(center, width * 0.5, height * 0.5, 0.0, 0.0, std::f64::consts::PI * 2.0, 
+                                        state.borrow().color().to_string(), state.borrow().line_width(), state.borrow().background());
 
                                     let mut ctx = context_clone.borrow_mut(); // Context를 미리 빌려오기
                                     ellipse.draw_xor(&mut *ctx, &*state.borrow());
@@ -447,7 +446,8 @@ pub fn start() -> Result<(), JsValue> {
                     let drawing_mode = state_ref.drawing_mode();
                     match drawing_mode{
                         DrawingMode::Pencil =>{
-                            let pencil = Pencil::new(state.borrow().color().to_string(), state.borrow().line_width(), mouse_context_points.borrow().clone());
+                            let pencil = Pencil::new(mouse_context_points.borrow().clone(),
+                             state.borrow().color().to_string(), state.borrow().line_width(), state.borrow().background());
 
                             let instance = VecDrawDoc::instance();
                             let mut doc = instance.lock().unwrap();
@@ -469,7 +469,8 @@ pub fn start() -> Result<(), JsValue> {
                             let end = mouse_context_points_ref.get(mouse_context_points.borrow().len() - 1).unwrap();
                             let width = end.x - start.x;
                             let height = end.y - start.y;
-                            let rectangle = Rectangle::new(state.borrow().color().to_string(), state.borrow().line_width(), *start, width, height);
+                            let rectangle = Rectangle::new(*start, width, height, 
+                                state.borrow().color().to_string(), state.borrow().line_width(), state.borrow().background());
 
                             let instance = VecDrawDoc::instance();
                             let mut doc = instance.lock().unwrap();
@@ -482,7 +483,8 @@ pub fn start() -> Result<(), JsValue> {
                             let width = end.x - start.x;
                             let height = end.y - start.y;
                             let center = Point2D::new((start.x + end.x) * 0.5, (start.y + end.y) * 0.5);
-                            let ellipse = Ellipse::new(center, width * 0.5, height * 0.5, 0.0, 0.0, std::f64::consts::PI * 2.0, state.borrow().color().to_string(), state.borrow().line_width());
+                            let ellipse = Ellipse::new(center, width * 0.5, height * 0.5, 0.0, 0.0, std::f64::consts::PI * 2.0, 
+                                state.borrow().color().to_string(), state.borrow().line_width(), state.borrow().background());
 
                             let instance = VecDrawDoc::instance();
                             let mut doc = instance.lock().unwrap();
@@ -576,8 +578,15 @@ pub fn start() -> Result<(), JsValue> {
         closure.forget();
     }
 
-    // 색상 선택 이벤트
+    // 라인 색상 선택 이벤트
     {
+        info!("color picker listener");
+
+        let color_picker: HtmlInputElement = document
+        .get_element_by_id("color-picker")
+        .expect("Color picker not found")
+        .dyn_into::<HtmlInputElement>()?;
+
         STATE.with(|state|{
             let state_clone = Rc::clone(state); // ✅ `Rc<RefCell<T>>` 클론을 사용하여 상태를 전달
 
@@ -618,6 +627,108 @@ pub fn start() -> Result<(), JsValue> {
 
             closure.forget(); // 메모리에서 해제되지 않도록 유지
         });
+    }
+
+    // 배경 색상 선택 이벤트
+    {
+        let fill_color: HtmlInputElement = document
+            .get_element_by_id("fill-color")
+            .expect("fill picker not found")
+            .dyn_into::<HtmlInputElement>()?;
+
+        let fill_color_preview: HtmlElement = document
+            .get_element_by_id("fillColorPreview")
+            .expect("fill color preview not found")
+            .dyn_into::<HtmlElement>()?;
+        let fill_color_preview_clone = fill_color_preview.clone();
+
+        let clear_fill_button = document.get_element_by_id("clear-fill").unwrap();
+        let clear_fill_button_clone = clear_fill_button.clone();
+
+        let fill_color_closure = Closure::wrap(Box::new(move |event: web_sys::Event| {
+            if let Some(target) = event.target() {
+                if let Ok(input) = target.dyn_into::<HtmlInputElement>() {
+                    STATE.with(|state|{
+                        let state_clone = Rc::clone(state); // ✅ `Rc<RefCell<T>>` 클론을 사용하여 상태를 전달
+                        state_clone.borrow_mut().set_background(Some(input.value()));
+
+                        fill_color_preview.set_class_name("");
+                        fill_color_preview.style().set_property("background-color", &input.value()).unwrap();
+
+                        clear_fill_button_clone.set_text_content(Some("Fill"));
+                        clear_fill_button_clone.set_class_name("active");
+                    });
+                }
+            }
+        }) as Box<dyn FnMut(_)>);
+
+        fill_color.add_event_listener_with_callback("input", fill_color_closure.as_ref().unchecked_ref())
+        .expect("Failed to add event listener");
+        fill_color_closure.forget();
+
+        let clear_fill_button_clone = clear_fill_button.clone();
+
+        let clear_fill_closure = Closure::wrap(Box::new(move |_event: web_sys::MouseEvent| {
+            STATE.with(|state| {
+                let state_clone = Rc::clone(state); // ✅ `Rc<RefCell<T>>` 클론을 사용하여 상태를 전달
+
+                let caption = clear_fill_button.text_content().unwrap();
+                if caption == "No Fill"{
+                    let color = fill_color.value();
+                    state_clone.borrow_mut().set_background(Some(color.clone()));
+
+                    fill_color_preview_clone.set_class_name("");
+                    fill_color_preview_clone.style().set_property("background-color", &color.clone()).unwrap();
+                    
+                    clear_fill_button.set_text_content(Some("Fill"));
+                    clear_fill_button.set_class_name("active");
+                }
+                else{
+                    state_clone.borrow_mut().set_background(None);
+
+                    fill_color_preview_clone.set_class_name("transparent");
+                    fill_color_preview_clone.style().set_property("background-color", "white").unwrap();
+                    clear_fill_button.set_text_content(Some("No Fill"));
+                    clear_fill_button.set_class_name("");
+                }
+            });
+        }) as Box<dyn FnMut(_)>);
+
+        clear_fill_button_clone.add_event_listener_with_callback("click", clear_fill_closure.as_ref().unchecked_ref())
+        .expect("Failed to add clear fill event listener");
+        clear_fill_closure.forget();
+    }
+
+    // Fit 버튼 이벤트
+    {
+        let canvas_clone = Rc::new(canvas.clone());
+        let context_clone = Rc::clone(&piet_ctx);
+        let closure = Closure::wrap(Box::new(move |_event: web_sys::MouseEvent| {
+            STATE.with(|state| {
+                let instance = VecDrawDoc::instance();
+                let mut doc = instance.lock().unwrap();
+                if let Some(bounding_rect) = doc.bounding_rect(){
+                    // 스케일 계산
+                    let scale_x = canvas_clone.width() as f64 / bounding_rect.width();
+                    let scale_y = canvas_clone.height() as f64 / bounding_rect.height();
+                    let scale = scale_x.min(scale_y); // 가로/세로 중 작은 값으로 균형 맞추기
+                    
+                    // 중앙 정렬을 위한 오프셋 계산
+                    let min = bounding_rect.min();
+                    let offset_x = (canvas_clone.width() as f64 - bounding_rect.width() * scale) / 2.0 - min.x * scale;
+                    let offset_y  = (canvas_clone.height() as f64 - bounding_rect.height() * scale) / 2.0 - min.y * scale;
+
+                    state.borrow_mut().set_scale(scale);
+                    state.borrow_mut().set_offset(&Point2D::new(offset_x, offset_y));
+
+                    doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
+                }
+            });
+        }) as Box<dyn FnMut(_)>);
+
+        let fit_button = document.get_element_by_id("fit-btn").unwrap();
+        fit_button.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref()).unwrap();
+        closure.forget();
     }
 
     // 지우기 버튼 이벤트

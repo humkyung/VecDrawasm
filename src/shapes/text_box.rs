@@ -26,8 +26,7 @@ use once_cell::sync::Lazy;
 use std::thread;
 
 use crate::state::State;
-use super::geometry::Vector2D;
-use super::geometry::{Point2D};
+use super::geometry::{Point2D, Vector2D, BoundingRect2D};
 use super::shape::{Shape, convert_to_color};
 
 pub struct TextBoxManager {
@@ -655,6 +654,10 @@ impl Shape for TextBox{
 
     fn max_point(&self) -> Point2D{
         Point2D::new(self.position.x + self.width, self.position.y + self.height)
+    }
+
+    fn bounding_rect(&self) -> super::geometry::BoundingRect2D {
+        BoundingRect2D { min: self.min_point(), max: self.max_point() }
     }
 
     fn is_hit(&self, x: f64, y: f64, scale: f64) -> bool {
