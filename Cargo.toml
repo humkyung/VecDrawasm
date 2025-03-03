@@ -15,6 +15,20 @@ serde-wasm-bindgen = "0.6.5"
 console_error_panic_hook = "0.1"
 once_cell = "1.20.3"
 
+# Piet (벡터 그래픽 라이브러리)를 사용하기 위해 추가한 라이브러리
+piet = "0.7.0"
+piet-web = "0.7.0"
+
+# Kurbo(Piet에서 사용하는 기하학적 도형)
+kurbo = "0.11.1"
+
+svg2pdf = "0.12.0"
+
+rand = {version =  "0.8", features = ["getrandom"]}
+getrandom = { version = "0.2", features = ["js"] }
+
+wasm-bindgen-test = "0.3"
+
 [lib]
 crate-type = ["cdylib"]
 

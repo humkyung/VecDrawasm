@@ -6,6 +6,7 @@ use std::str;
 use std::task::Context;
 use std::thread::panicking;
 use log::info;
+use piet_web::WebRenderContext;
 use wasm_bindgen::convert::FromWasmAbi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -14,9 +15,14 @@ use web_sys::console::group;
 use web_sys::console::info;
 use web_sys::{window, CanvasRenderingContext2d, Element, DomParser, CanvasGradient, HtmlCanvasElement, Path2d, CssStyleDeclaration};
 
+use piet::{RenderContext, Color, StrokeStyle, Text, TextLayout, TextLayoutBuilder, ImageFormat};
+use kurbo::Affine;
+
+use crate::state::State;
 use super::geometry::Vector2D;
 use super::geometry::{Point2D};
-use super::shape::{Shape};
+use super::shape::hex_to_color;
+use super::shape::Shape;
 
 #[derive(Debug, Clone)]
 pub struct Line{
@@ -131,49 +137,48 @@ impl Shape for Line{
     /*
         라인을 캔버스에 그린다.
      */
-    fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64){
+    fn draw(&self, context: &mut WebRenderContext, scale: f64){
+        let mut color = hex_to_color(&self.color);
         if self.hovered{
-            context.set_stroke_style(&JsValue::from_str("#ff0000"));
+            color = Color::RED;
         }
-        else{
-            context.set_stroke_style(&JsValue::from_str(&self.color));
-        }
+
+        // Define stroke style
+        let mut stroke_style = StrokeStyle::new();
+        stroke_style.set_dash_pattern([10.0 / scale, 5.0 / scale]); // Dashed line pattern
+        stroke_style.set_line_cap(piet::LineCap::Round);
+        stroke_style.set_line_join(piet::LineJoin::Bevel);
+
         let adjusted_width = self.line_width / scale;
-        context.set_line_width(adjusted_width);
-        context.begin_path();
-        context.move_to(self.start.x, self.start.y);
-        context.line_to(self.end.x, self.end.y);
-        context.close_path();
-        context.stroke();
+
+        let line = piet::kurbo::Line::new((self.start.x, self.start.y), (self.end.x, self.end.y));
+        context.stroke_styled(line, &color, adjusted_width, &stroke_style);
 
         if self.selected{ self.draw_control_points(context, scale);}
     }   
 
-    fn draw_xor(&self, context: &CanvasRenderingContext2d, scale: f64){
+    // XOR로 그리기
+    fn draw_xor(&self, context: &mut WebRenderContext, state: &State){
         context.save();
-        context.set_global_composite_operation("xor").expect("something goes wrong when apply xor");
 
-        context.begin_path();
-        context.move_to(self.start.x, self.start.y);
-        context.line_to(self.end.x, self.end.y);
-        context.close_path();
+        // 줌 및 팬 적용 (기존의 scale과 offset 유지)
+        let scale = state.scale();
+        let offset = state.offset();
+        info!("scale = {}, offset = {:?}", scale, offset);
+        context.transform(Affine::new([scale, 0.0, 0.0, scale, offset.x, offset.y]));
 
-        context.set_stroke_style(&JsValue::from_str(&self.color));
-        let adjusted_width = self.line_width / scale;
-        context.set_line_width(adjusted_width);
+        self.draw(context, scale);
 
-        context.stroke();
         context.restore();
     }
 
-    fn draw_control_points(&self, context: &CanvasRenderingContext2d, scale: f64) {
-        context.set_fill_style(&"#FF0000".into()); // Red control points
-
-        let adjusted_width = 1.0 / scale * 5.0;
-        context.begin_path();
-        context.rect(self.start.x - adjusted_width, self.start.y - adjusted_width, adjusted_width * 2.0, adjusted_width * 2.0);
-        context.rect(self.end.x - adjusted_width, self.end.y - adjusted_width, adjusted_width * 2.0, adjusted_width * 2.0);
-        context.fill();
+    /// Draw control points
+    fn draw_control_points(&self, context: &mut WebRenderContext, scale: f64) {
+        let adjusted_width = 5.0 / scale;
+        let rect = piet::kurbo::Rect::new(self.start.x - adjusted_width, self.start.y - adjusted_width, self.start.x + adjusted_width, self.start.y + adjusted_width);
+        context.fill(rect, &Color::RED);
+        let rect = piet::kurbo::Rect::new(self.end.x - adjusted_width, self.end.y - adjusted_width, self.end.x + adjusted_width, self.end.y + adjusted_width);
+        context.fill(rect, &Color::RED);
     }
 
     fn as_any(&self) -> &dyn Any {

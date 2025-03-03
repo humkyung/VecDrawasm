@@ -1,87 +1,76 @@
-use std::any::Any;
-use std::sync::Arc;
-use js_sys::Math::acosh;
-use js_sys::Promise;
-use js_sys::Uint32Array;
-use log::info;
-use shapes::rectangle;
-use state::{ActionMode, DrawingMode};
+use kurbo::Point;
+use piet::{RenderContext, Color, Text, TextLayout, TextLayoutBuilder, ImageFormat, StrokeStyle, FontFamily};
+use kurbo::{Affine};
+use piet_web::WebRenderContext;
+use shapes::shape::Shape;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::JsFuture;
-use web_sys::DomRect;
-use web_sys::Window;
-use web_sys::{window, Document, CanvasRenderingContext2d, HtmlCanvasElement, InputEvent, HtmlTextAreaElement, HtmlInputElement, HtmlImageElement, MouseEvent, WheelEvent, DragEvent, File, FileReader, Element, Path2d
-    , HtmlDivElement , DomParser, HtmlElement, Node, NodeList, ImageData, Blob, KeyboardEvent, CompositionEvent, TextMetrics};
-use std::char::UNICODE_VERSION;
-use std::fs::OpenOptions;
+use web_sys::{window, CanvasRenderingContext2d, HtmlElement, HtmlCanvasElement, HtmlInputElement, MouseEvent, WheelEvent, KeyboardEvent, CompositionEvent, InputEvent};
+use log::info;
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use once_cell::sync::Lazy;
-use std::sync::{Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread;
+
+use rand::{Rng, SeedableRng};
+use rand::rngs::StdRng;
+
+use state::{ActionMode, DrawingMode};
 
 mod shapes{
     pub mod geometry;
     pub mod shape;
     pub mod line;
+    pub mod pencil;
     pub mod rectangle;
     pub mod ellipse;
     pub mod text_box;
 }
-
-mod vec_draw_doc;
-use crate::vec_draw_doc::VecDrawDoc;
-
 use crate::shapes::geometry::{Point2D, Vector2D};
-use std::cmp::PartialEq;
-use crate::shapes::shape::{Shape, Pencil, Svg};
-use crate::shapes::{line::Line, rectangle::Rectangle, ellipse::Ellipse, text_box::TextBox, text_box::TextBoxManager};
+use crate::shapes::{pencil::Pencil, line::Line, rectangle::Rectangle, ellipse::Ellipse, text_box::TextBox, text_box::TextBoxManager};
 
 pub mod state;
 use crate::state::State;
 
-pub mod hytos;
+mod vec_draw_doc;
+use crate::vec_draw_doc::VecDrawDoc;
+
+mod generate_pdf; // 📌 `piet_svg.rs` 모듈 불러오기
 
 // SHAPES 벡터 정의
 thread_local! {
     static IS_MOUSE_PRESSED: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
     static STATE: Rc<RefCell<State>> = Rc::new(RefCell::new(State::new("#0000FF".to_string(), 1.0)));
-    static TEXTBOXMANAGER: Rc<RefCell<Option<TextBoxManager>>> = Rc::new(RefCell::new(None));
-    static IMAGE_BACKUP: Rc<RefCell<Option<ImageData>>> = Rc::new(RefCell::new(None));
+    static PIET_CTX: Rc<RefCell<Option<Rc<RefCell<WebRenderContext<'static>>>>>> = Rc::new(RefCell::new(None));
 }
 
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
     console_log::init_with_level(log::Level::Info).unwrap();
 
-    // 브라우저의 Window 및 Document 객체 가져오기
-    let window = web_sys::window().expect("No global window exists");
-    let document = window.document().expect("Should have a document on window");
+    // Get browser window and document
+    let window = web_sys::window().ok_or("No global window exists")?;
+    let document= window.document().ok_or("Should have a document on window")?;
 
-    fn request_animation_frame(window: &web_sys::Window, f: &Closure<dyn FnMut()>) {
-        window
-            .request_animation_frame(f.as_ref().unchecked_ref())
-            .expect("should register `requestAnimationFrame` OK");
-    }
-
-    // HTML5 캔버스 가져오기
+    // Get the canvas element
     let canvas = document
         .get_element_by_id("drawing-canvas")
-        .expect("Canvas element not found")
+        .ok_or("Canvas element not found")?
         .dyn_into::<HtmlCanvasElement>()?;
 
-    // ✅ Use `willReadFrequently: true`
-    let context_options = js_sys::Object::new();
-    js_sys::Reflect::set(&context_options, &"willReadFrequently".into(), &true.into())?;
-
-    // 캔버스 2D 렌더링 컨텍스트 가져오기
+    // Get rendering context
     let context = canvas
         .get_context("2d")?
         .ok_or("Failed to get 2D context")?
-        .dyn_into::<CanvasRenderingContext2d>()?;
+        .dyn_into::<web_sys::CanvasRenderingContext2d>()?;
 
+    let piet_ctx = Rc::new(RefCell::new(WebRenderContext::new(context.clone(), window.clone())));
+    PIET_CTX.with(|ctx|{
+        *ctx.borrow_mut() = Some(piet_ctx.clone());
+    });
+    
     let color_picker: HtmlInputElement = document
         .get_element_by_id("color-picker")
         .expect("Color picker not found")
@@ -92,182 +81,50 @@ pub fn start() -> Result<(), JsValue> {
         .expect("Line width input not found")
         .dyn_into::<HtmlInputElement>()?;
 
-    TEXTBOXMANAGER.with(|manager|{
-        let tbm = TextBoxManager::new(document.clone(), context.clone());
-        *manager.borrow_mut() = Some(tbm);
-    });
-
     // ✅ 모드 선택 UI
     setup_mode_buttons();
     let _ = setup_keyboard_shortcuts();
 
     // 초기 캔버스 상태
     let last_mouse_pos = Rc::new(RefCell::new((0.0, 0.0)));
-
-    let animation_requested = Rc::new(RefCell::new(false));
-
     // 드로잉 포인트
     let mouse_context_points: Rc<RefCell<Vec<Point2D>>> = Rc::new(RefCell::new(Vec::new()));
 
-    // 🎨 드래그 앤 드롭 이벤트 추가
-    let canvas_clone = Rc::new(canvas.clone());
-    let context_clone = Rc::new(context.clone());
-
-    // ⬇️ `dragover` 이벤트: 기본 동작 방지하여 드롭 가능하게 함
+    // show initial canvas
     {
-        let closure = Closure::wrap(Box::new(move |event: DragEvent| {
-            event.prevent_default();
-        }) as Box<dyn FnMut(_)>);
+        STATE.with(|state| {
+            let instance = VecDrawDoc::instance();
+            let mut doc = instance.lock().unwrap();
 
-        canvas.add_event_listener_with_callback("dragover", closure.as_ref().unchecked_ref())?;
-        closure.forget();
-    }
+            /*
+            let seed = js_sys::Math::random() as u64; // JS의 랜덤 함수를 이용해 시드 생성
+            let mut rng = StdRng::seed_from_u64(seed); // 매번 다른 시드를 사용
+            for i in 0..1000{
+                let mouse_context_points_ref = mouse_context_points.borrow();
+                let number1 = rng.gen_range(0..10000);
+                let number2 = rng.gen_range(0..10000);
+                let start = Point2D::new(number1 as f64 , number2 as f64);
+                let number1 = rng.gen_range(0..10000);
+                let number2 = rng.gen_range(0..10000);
+                let end = Point2D::new(number1 as f64, number2 as f64);
+                let line = Line::new(state.borrow().color().to_string(), state.borrow().line_width(), start, end);
 
-    // ⬇️ `drop` 이벤트: 파일을 읽어서 Canvas에 로드
-    {
-        let library_panel: HtmlDivElement = document
-            .get_element_by_id("library-panel")
-            .unwrap()
-            .dyn_into::<HtmlDivElement>()?;
-
-        let library_panel_clone = Rc::new(library_panel.clone());
-
-        let context_clone = Rc::clone(&context_clone);
-        let document_clone = Rc::new(document.clone());
-        let canvas_clone = Rc::new(canvas.clone());
-        let rect = canvas_clone.get_bounding_client_rect();
-
-        let closure = Closure::wrap(Box::new(move |event: DragEvent| {
-            event.prevent_default();
-
-            if let Some(data_transfer) = event.data_transfer() {
-                if let Some(files) = data_transfer.files(){
-                    for i in 0..files.length() {
-                        if let Some(file) = files.get(i) {
-                            let file_name = file.name();
-                            if file_name.ends_with(".hytos") {
-                                info!("render hytos file"); // 값을 콘솔에 출력
-                                wasm_bindgen_futures::spawn_local(async move {
-                                    hytos::read_sqlite_file(file).await;
-                                });
-                            } else if file_name.ends_with(".svg") {
-                                info!("render svg file"); // 값을 콘솔에 출력
-                                /*if let Ok(svg_data) = data_transfer.get_data("text/plain") {
-                                    //info!("svg data={svg_data}"); // 값을 콘솔에 출력
-
-                                    let rect = canvas_clone.get_bounding_client_rect();
-                                    let mouse_x = event.client_x() as f64 - rect.left();
-                                    let mouse_y = event.client_y() as f64 - rect.top();
-                                    let (drop_x, drop_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (0.0, 0.0), &*state_clone.borrow());
-                                    render_svg_to_canvas(&context_clone, &canvas_clone, &svg_data, drop_x, drop_y);
-                                }
-                                else*/{
-                                    let svg_data = Rc::new(RefCell::new(String::new()));
-                                    let svg_data_clone = Rc::clone(&svg_data);
-                                    let context_clone = Rc::clone(&context_clone);
-                                    let canvas_clone = Rc::clone(&canvas_clone);
-
-                                    let mouse_x = event.client_x() as f64 - rect.left();
-                                    let mouse_y = event.client_y() as f64 - rect.top();
-
-                                    wasm_bindgen_futures::spawn_local(async move {
-                                        let svg_content = render_svg_file(&context_clone, &canvas_clone, file, mouse_x, mouse_y).await.unwrap();
-                                        *svg_data_clone.borrow_mut() = svg_content;
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }else{
-                    if let Ok(svg_data) = data_transfer.get_data("text/plain") {
-                        //info!("svg data={svg_data}"); // 값을 콘솔에 출력
-
-                        info!("render svg"); // 값을 콘솔에 출력
-                        let rect = canvas_clone.get_bounding_client_rect();
-                        let mouse_x = event.client_x() as f64 - rect.left();
-                        let mouse_y = event.client_y() as f64 - rect.top();
-                        let (drop_x, drop_y) = calculate_canvas_coordinates((event.client_x() as f64, event.client_y() as f64), (0.0, 0.0));
-                        render_svg_to_canvas(&context_clone, &canvas_clone, &svg_data, drop_x, drop_y);
-                    } else {
-                        let promise: Result<Promise, wasm_bindgen::JsValue> = data_transfer.get_files();
-                        if let Ok(promise) = promise {
-                            wasm_bindgen_futures::spawn_local(async move {
-                                match JsFuture::from(promise).await {
-                                    Ok(js_files) => {
-                                        let files: web_sys::FileList = js_files.into();
-                                        if let Some(file) = files.get(0) {
-                                            hytos::read_sqlite_file(file).await;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        info!("Error reading file: {:?}", e);
-                                    }
-                                }
-                            });
-                        }
-                    }
-                }
+                doc.add_shape(Box::new(line)); 
             }
-        }) as Box<dyn FnMut(_)>);
+            */
 
-        canvas.add_event_listener_with_callback("drop", closure.as_ref().unchecked_ref())?;
-        closure.forget();
-    }
-
-    async fn render_svg_file(context: &CanvasRenderingContext2d, canvas: &Element, file: File, mouse_x: f64, mouse_y: f64) -> Result<String, JsValue> {
-        let reader = FileReader::new().unwrap();
-
-        // 파일을 Blob으로 변환
-        let blob: Blob = file.slice().map_err(|e| {
-            web_sys::console::error_1(&format!("Error slicing file: {:?}", e).into());
-            e
-        })?;
-
-        // FileReader로 텍스트 읽기
-        reader.read_as_text(&blob).map_err(|e| {
-            web_sys::console::error_1(&format!("Error reading file: {:?}", e).into());
-            e
-        })?;
-
-        // Promise를 생성하여 `onload`가 완료될 때까지 기다림
-        let promise = Promise::new(&mut |resolve, _| {
-            let onload_closure = Closure::wrap(Box::new(move |_event: web_sys::Event| {
-                resolve.call0(&JsValue::null()).unwrap();
-            }) as Box<dyn FnMut(_)>);
-
-            reader.set_onload(Some(onload_closure.as_ref().unchecked_ref()));
-            onload_closure.forget(); // Rust에서 GC로부터 해제 방지
+            PIET_CTX.with(|ctx|{
+                if let Some(ref mut ctx) = *ctx.borrow_mut() {
+                    doc.draw(&canvas, &mut ctx.borrow_mut(), &state.borrow());
+                }
+            });
         });
-
-        // `onload`가 완료될 때까지 대기
-        JsFuture::from(promise).await?;
-
-        // 읽은 파일 내용을 가져오기
-        let svg_data= reader.result().unwrap().as_string().unwrap();
-        web_sys::console::log_1(&format!("File content: {}", svg_data).into());
-
-        let (drop_x, drop_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (0.0, 0.0));
-        render_svg_to_canvas(&context, &canvas, &svg_data, drop_x, drop_y);
-
-        Ok(svg_data)
-    }
-
-    // 🎯 Canvas에 SVG를 벡터로 렌더링
-    #[wasm_bindgen]
-    pub fn render_svg_to_canvas(context: &CanvasRenderingContext2d, _canvas: &Element, svg_data: &str, x: f64, y: f64) {
-        info!("svg data={svg_data}"); // 값을 콘솔에 출력
-
-        let mut svg = Svg::new(Point2D::new(x, y), svg_data); 
-        svg.draw(context, 1.0);
-
-        let instance = VecDrawDoc::instance();
-        instance.lock().unwrap().add_shape(Box::new(svg));
     }
 
     // 마우스 휠 이벤트 (줌)
     {
-        let context_clone = Rc::new(context.clone());
-        let canvas_clone= canvas.clone();
+        let canvas_clone = Rc::new(canvas.clone());
+        let context_clone = Rc::clone(&piet_ctx);
 
         add_wheelevent_listener(&canvas, "wheel", move |event: WheelEvent| {
             event.prevent_default();
@@ -287,16 +144,9 @@ pub fn start() -> Result<(), JsValue> {
                 offset.set_y(mouse_y - zoom_factor * (mouse_y - offset.y));
                 state.borrow_mut().set_offset(&offset);
 
-                // 잔상 방지를 위해 전체 캔버스를 리셋
-                context_clone.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).unwrap(); // 변환 초기화
-                context_clone.clear_rect(0.0, 0.0, client_rect.width(), client_rect.height()); // 전체 캔버스 지우기
-                context_clone.set_fill_style(&JsValue::from_str(state.borrow().fill_color()));
-                context_clone.fill_rect(0.0, 0.0, client_rect.width(), client_rect.height());
-
-                // 캔버스 다시 그리기
-                let _ = context_clone.set_transform(state.borrow().scale(), 0.0, 0.0, state.borrow().scale(), offset.x, offset.y);
                 let instance = VecDrawDoc::instance();
-                instance.lock().unwrap().draw(&context_clone, &*state.borrow());
+                let doc = instance.lock().unwrap();
+                doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
             });
         })?;
     }
@@ -304,7 +154,8 @@ pub fn start() -> Result<(), JsValue> {
     // 마우스 다운 이벤트 (팬 시작)
     { 
         let last_mouse_pos = Rc::clone(&last_mouse_pos);
-        let canvas_clone = canvas.clone();
+        let canvas_clone = Rc::new(canvas.clone());
+        let context_clone = Rc::clone(&piet_ctx);
         let mouse_context_points= Rc::clone(&mouse_context_points);
 
         add_event_listener(&canvas, "mousedown", move |event: MouseEvent| {
@@ -346,56 +197,47 @@ pub fn start() -> Result<(), JsValue> {
                         shape.set_selected(true);
                     });
 
-                    doc.draw(&context_clone, &*state.borrow());
+                    doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
                 }
                 else if state.borrow().action_mode() == &state::ActionMode::Drawing{
                     let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
                     if state.borrow().drawing_mode() == &state::DrawingMode::Text{
-                        TEXTBOXMANAGER.with(|tbm|{
-                            if let Some(ref mut manager) = *tbm.borrow_mut() {
-                                if !manager.is_active(){
-                                    let instance = VecDrawDoc::instance();
-                                    let mut doc = instance.lock().unwrap();
+                        let instance = TextBoxManager::instance();
+                        let mut tbm= instance.lock().unwrap();
 
-                                    doc.add_shape(Box::new(TextBox::new(current_x, current_y)));
-                                    // TextBoxManager 시작
-                                    if let Some(shape) = doc.nth(doc.count() - 1){
-                                        manager.attach(Arc::clone(&shape));
-                                    }
-                                }else{
-                                    manager.finish_input();
-                                }
+                        if !tbm.is_active(){
+                            let instance = VecDrawDoc::instance();
+                            let mut doc = instance.lock().unwrap();
+
+                            doc.add_shape(Box::new(TextBox::new(current_x, current_y)));
+                            // TextBoxManager 시작
+                            if let Some(shape) = doc.nth(doc.count() - 1){
+                                tbm.attach(Arc::clone(&shape), &state.borrow());
                             }
-                        });
+
+                            doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
+                        }else{
+                            tbm.finish_input(&state.borrow());
+                        }
                     }
+
+                    // 마우스 위치 저장
+                    state.borrow_mut().set_world_coord(Point::new(current_x, current_x));
+                    *last_mouse_pos.borrow_mut() = (mouse_x, mouse_y);
+
+                    let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
+                    mouse_context_points.borrow_mut().push(Point2D { x: current_x, y: current_y });
                 }
-
-                // ✅ 현재 캔버스 상태 백업 (이전 선택 영역 복원용)
-                /*IMAGE_BACKUP.with(|backup| {
-                    let image_data = context_clone.get_image_data(0.0, 0.0, canvas_clone.width() as f64, canvas_clone.height() as f64).unwrap();
-                    *backup.borrow_mut() = Some(image_data);
-                });
-                */
-
-                // 마우스 위치 저장
-                *last_mouse_pos.borrow_mut() = (mouse_x, mouse_y);
-
-                let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
-                mouse_context_points.borrow_mut().push(Point2D { x: current_x, y: current_y });
             });
         })?;
     }
 
     // 마우스 이동 이벤트
     {
-        let canvas_clone = canvas.clone();
-        let context_clone = Rc::new(context.clone());
-
+        let canvas_clone = Rc::new(canvas.clone());
+        let context_clone = Rc::clone(&piet_ctx);
         let last_mouse_pos = Rc::clone(&last_mouse_pos);
-
         let mouse_context_points= Rc::clone(&mouse_context_points);
-
-        let animation_requested_clone = Rc::clone(&animation_requested);
 
         add_event_listener(&canvas, "mousemove", move |event: MouseEvent| {
             event.prevent_default();
@@ -414,8 +256,7 @@ pub fn start() -> Result<(), JsValue> {
             STATE.with(|state| {
                 canvas_clone.set_class_name("cursor-default");
 
-                //draw_ruler(&context_clone, canvas_clone.width() as f64, canvas_clone.height() as f64, mouse_x, mouse_y);
-
+                let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
                 IS_MOUSE_PRESSED.with(|pressed|{
                     if *pressed.borrow() {
                         if state.borrow().is_panning() {
@@ -427,63 +268,36 @@ pub fn start() -> Result<(), JsValue> {
                             offset.set_y(offset.y + dy);
                             state.borrow_mut().set_offset(&offset);
 
-                            if !*animation_requested_clone.borrow(){
-                                *animation_requested_clone.borrow_mut() = true;
-                                // 캔버스 다시 그리기
-                                let scale = state.borrow().scale();
-                                let _ = context_clone.set_transform(scale, 0.0, 0.0, scale, offset.x, offset.y);
-                                /*IMAGE_BACKUP.with(|backup| {
-                                    if let Some(ref image_data) = *backup.borrow() {
-                                        context_clone.put_image_data(image_data, 0.0, 0.0).unwrap();
-                                    }
-                                });*/
-                                let instance = VecDrawDoc::instance();
-                                instance.lock().unwrap().draw(&context_clone, &*state.borrow());
-
-                                *animation_requested_clone.borrow_mut() = false;
-                            }
+                            let instance = VecDrawDoc::instance();
+                            let doc = instance.lock().unwrap();
+                            doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
                         }else if state.borrow().action_mode() == &state::ActionMode::Eraser{
-                            let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
-
                             let instance = VecDrawDoc::instance();
                             let mut doc = instance.lock().unwrap();
                             doc.erase(current_x, current_y, state.borrow().scale());
-                            doc.draw(&context_clone, &*state.borrow());
+                            doc.draw(&*&canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
                         }else if state.borrow().action_mode() == &state::ActionMode::Drawing{
                             let (last_x, last_y) = calculate_canvas_coordinates((last_x, last_y), (scroll_x, scroll_y));
-                            let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
                             
+                            let instance = VecDrawDoc::instance();
+                            let doc = instance.lock().unwrap();
+                            doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
+
                             let drawing_mode = *state.borrow().drawing_mode();
                             match drawing_mode {
                                 DrawingMode::Pencil =>{
-                                    context_clone.set_stroke_style(&JsValue::from_str(state.borrow().color()));
-                                    context_clone.begin_path();
-                                    context_clone.move_to(last_x, last_y);
-                                    context_clone.line_to(current_x, current_y);
-                                    context_clone.stroke();
-
                                     mouse_context_points.borrow_mut().push(Point2D { x: current_x, y: current_y });
+
+                                    let pencil = Pencil::new(state.borrow().color().to_string(), state.borrow().line_width(), mouse_context_points.borrow().clone());
+                                    pencil.draw_xor(&mut *context_clone.borrow_mut(), &*state.borrow());
                                 }
                                 DrawingMode::Line =>{
                                     let start_point = *mouse_context_points.borrow().get(0).unwrap();
-
-                                    /*
-                                    IMAGE_BACKUP.with(|backup| {
-                                        if let Some(ref image_data) = *backup.borrow() {
-                                            context_clone.put_image_data(image_data, 0.0, 0.0).unwrap();
-                                        }
-                                    });
-                                    */
-                                    //shape.draw_xor(&context_clone);
-                                    //redraw(&context_clone);
-
-                                    let instance = VecDrawDoc::instance();
-                                    let doc = instance.lock().unwrap();
-                                    doc.draw(&context_clone, &*state.borrow());
-
                                     let end_point = Point2D::new(current_x, current_y);
+                                    let mut ctx = context_clone.borrow_mut(); // Context를 미리 빌려오기
+
                                     let line = Line::new(state.borrow().color().to_string(), state.borrow().line_width(), start_point, end_point);
-                                    line.draw_xor(&context_clone, state.borrow().scale());
+                                    line.draw_xor(&mut *ctx, &*state.borrow());
 
                                     if mouse_context_points.borrow().len() == 1{
                                         mouse_context_points.borrow_mut().push(end_point);
@@ -496,23 +310,13 @@ pub fn start() -> Result<(), JsValue> {
                                 DrawingMode::Rectangle =>{
                                     let start_point = *mouse_context_points.borrow().get(0).unwrap();
 
-                                    /*
-                                    IMAGE_BACKUP.with(|backup| {
-                                        if let Some(ref image_data) = *backup.borrow() {
-                                            context_clone.put_image_data(image_data, 0.0, 0.0).unwrap();
-                                        }
-                                    });
-                                   */ 
-
-                                    let instance = VecDrawDoc::instance();
-                                    let doc = instance.lock().unwrap();
-                                    doc.draw(&context_clone, &*state.borrow());
-
                                     let end_point = Point2D::new(current_x, current_y);
                                     let width = end_point.x - start_point.x;
                                     let height = end_point.y - start_point.y;
                                     let rectangle = Rectangle::new(state.borrow().color().to_string(), state.borrow().line_width(), start_point, width, height);
-                                    rectangle.draw_xor(&context_clone, state.borrow().scale());
+
+                                    let mut ctx = context_clone.borrow_mut(); // Context를 미리 빌려오기
+                                    rectangle.draw_xor(&mut *ctx, &*state.borrow());
 
                                     if mouse_context_points.borrow().len() == 1{
                                         mouse_context_points.borrow_mut().push(end_point);
@@ -525,24 +329,14 @@ pub fn start() -> Result<(), JsValue> {
                                 DrawingMode::Ellipse =>{
                                     let start_point = *mouse_context_points.borrow().get(0).unwrap();
 
-                                    /*
-                                    IMAGE_BACKUP.with(|backup| {
-                                        if let Some(ref image_data) = *backup.borrow() {
-                                            context_clone.put_image_data(image_data, 0.0, 0.0).unwrap();
-                                        }
-                                    });
-                                    */
-
-                                    let instance = VecDrawDoc::instance();
-                                    let doc = instance.lock().unwrap();
-                                    doc.draw(&context_clone, &*state.borrow());
-
                                     let end_point = Point2D::new(current_x, current_y);
                                     let width = end_point.x - start_point.x;
                                     let height = end_point.y - start_point.y;
                                     let center = Point2D::new(current_x - width * 0.5, current_y - height * 0.5);
                                     let ellipse= Ellipse::new(center, width * 0.5, height * 0.5, 0.0, 0.0, std::f64::consts::PI * 2.0, state.borrow().color().to_string(), state.borrow().line_width());
-                                    ellipse.draw_xor(&context_clone, state.borrow().scale());
+
+                                    let mut ctx = context_clone.borrow_mut(); // Context를 미리 빌려오기
+                                    ellipse.draw_xor(&mut *ctx, &*state.borrow());
 
                                     if mouse_context_points.borrow().len() == 1{
                                         mouse_context_points.borrow_mut().push(end_point);
@@ -551,8 +345,6 @@ pub fn start() -> Result<(), JsValue> {
                                         mouse_context_points.borrow_mut().remove(1);
                                         mouse_context_points.borrow_mut().push(end_point);
                                     }
-                                }
-                                DrawingMode::Text => {
                                 }
                                 _ => info!("not supported drawing mode: {drawing_mode}"), // 값을 콘솔에 출력
                             }
@@ -578,7 +370,7 @@ pub fn start() -> Result<(), JsValue> {
                                     }
                                 });
 
-                                doc.draw(&context_clone, &*state.borrow());
+                                doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
                             }
                         }
                     }
@@ -604,10 +396,12 @@ pub fn start() -> Result<(), JsValue> {
                                 shape.lock().unwrap().set_hovered(false);
                             }
 
-                            shape.lock().unwrap().draw(&context_clone, state.borrow().scale());
+                            let mut ctx = context_clone.borrow_mut(); // Context를 미리 빌려오기
+                            shape.lock().unwrap().draw_xor(&mut ctx, &*state.borrow());
                         });
                     }
                 });
+                state.borrow_mut().set_world_coord(Point::new(current_x, current_y));
             });
 
             *last_mouse_pos.borrow_mut() = (mouse_x, mouse_y);
@@ -616,21 +410,30 @@ pub fn start() -> Result<(), JsValue> {
 
     // 마우스 업 이벤트 (팬 종료)
     {
-        let context_clone = Rc::new(context.clone());
+        let canvas_clone = Rc::new(canvas.clone());
+        let context_clone = Rc::clone(&piet_ctx);
         let mouse_context_points= Rc::clone(&mouse_context_points);
 
         add_event_listener(&canvas, "mouseup", move |event: MouseEvent| {
             event.prevent_default();
 
+            let client_rect = canvas_clone.get_bounding_client_rect();
+            let window = web_sys::window().unwrap();
+            let scroll_x = window.scroll_x().unwrap_or(0.0);
+            let scroll_y = window.scroll_y().unwrap_or(0.0);
+            let mouse_x = event.client_x() as f64 - client_rect.left();
+            let mouse_y = event.client_y() as f64 - client_rect.top();
+
+            IS_MOUSE_PRESSED.with(|pressed| *pressed.borrow_mut() = false);
             STATE.with(|state| {
-                IS_MOUSE_PRESSED.with(|pressed| *pressed.borrow_mut() = false);
-                state.borrow_mut().set_is_panning(&false);
-                state.borrow_mut().set_selected_control_point(None);
+                let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
 
-                // ✅ 선택 영역 확정 후, 캔버스 백업 초기화
-                IMAGE_BACKUP.with(|backup| *backup.borrow_mut() = None);
+                if state.borrow().is_panning() {
+                    state.borrow_mut().set_is_panning(&false);
+                    return;
+                }
 
-                if state.borrow().action_mode() == &ActionMode::Drawing{
+                if *state.borrow().action_mode() == ActionMode::Drawing {
                     let state_ref = state.borrow();
                     let drawing_mode = state_ref.drawing_mode();
                     match drawing_mode{
@@ -676,28 +479,16 @@ pub fn start() -> Result<(), JsValue> {
                             let mut doc = instance.lock().unwrap();
                             doc.add_shape(Box::new(ellipse));
                         }
-                        DrawingMode::Text =>{
-                            /*
-                            let mouse_context_points_ref = mouse_context_points.borrow();
-                            let start = mouse_context_points_ref.get(0).unwrap();
-                            let end = mouse_context_points_ref.get(mouse_context_points.borrow().len() - 1).unwrap();
-                            let width = end.x - start.x;
-                            let height = end.y - start.y;
-                            let center = Point2D::new((start.x + end.x) * 0.5, (start.y + end.y) * 0.5);
-                            let ellipse = Ellipse::new(center, width * 0.5, height * 0.5, 0.0, 0.0, std::f64::consts::PI * 2.0, state.borrow().color().to_string(), state.borrow().line_width());
-                            SHAPES.with(|shapes| {
-                                shapes.borrow_mut().push(Box::new(ellipse));
-                            });
-                            */
-                        }
+                        DrawingMode::Text =>{ }
                     }
                 }
 
                 mouse_context_points.borrow_mut().clear();
+                state.borrow_mut().set_world_coord(Point::new(current_x, current_y));
 
                 let instance = VecDrawDoc::instance();
                 let doc = instance.lock().unwrap();
-                doc.draw(&context_clone, &*state.borrow());
+                doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
             });
         })?;
     }
@@ -708,12 +499,9 @@ pub fn start() -> Result<(), JsValue> {
 
         //let start_manager = manager.clone();
         let composition_start_closure = Closure::wrap(Box::new(move |_event: CompositionEvent| {
-            TEXTBOXMANAGER.with(|tbm|{
-                if let Some(ref mut manager) = *tbm.borrow_mut() {
-                    manager.on_composition_start();
-                }
-            });
-            //start_manager.borrow_mut().on_composition_start();
+            let instance = TextBoxManager::instance();
+            let mut tbm = instance.lock().unwrap();
+            tbm.on_composition_start();
         }) as Box<dyn FnMut(_)>);
 
         let textarea = document.get_element_by_id("hidden-input").unwrap();
@@ -724,12 +512,11 @@ pub fn start() -> Result<(), JsValue> {
         // IME 조합 업데이트
         //let update_manager = manager.clone();
         let composition_update_closure = Closure::wrap(Box::new(move |event: CompositionEvent| {
-            TEXTBOXMANAGER.with(|tbm|{
-                if let Some(ref mut manager) = *tbm.borrow_mut() {
-                    manager.on_composition_update(event);
-                }
+            let instance = TextBoxManager::instance();
+            let mut tbm = instance.lock().unwrap();
+            STATE.with(|state|{
+                tbm.on_composition_update(event, &state.borrow());
             });
-            //update_manager.borrow_mut().on_composition_update(event);
         }) as Box<dyn FnMut(_)>);
 
         textarea
@@ -739,12 +526,11 @@ pub fn start() -> Result<(), JsValue> {
         // IME 조합 완료
         //let end_manager = manager.clone();
         let composition_end_closure = Closure::wrap(Box::new(move |event: CompositionEvent| {
-            TEXTBOXMANAGER.with(|tbm|{
-                if let Some(ref mut manager) = *tbm.borrow_mut() {
-                    manager.on_composition_end(event);
-                }
+            let instance = TextBoxManager::instance();
+            let mut tbm = instance.lock().unwrap();
+            STATE.with(|state|{
+                tbm.on_composition_end(event, &state.borrow());
             });
-            //end_manager.borrow_mut().on_composition_end(event);
         }) as Box<dyn FnMut(_)>);
 
         textarea
@@ -753,52 +539,31 @@ pub fn start() -> Result<(), JsValue> {
                           
         //let input_manager = manager.clone();
         let input_closure = Closure::wrap(Box::new(move |event: InputEvent| {
-            TEXTBOXMANAGER.with(|tbm|{
-                if let Some(ref mut manager) = *tbm.borrow_mut() {
-                    manager.on_input(event);
-                }
+            let instance = TextBoxManager::instance();
+            let mut tbm = instance.lock().unwrap();
+            STATE.with(|state|{
+                tbm.on_input(event, &state.borrow());
             });
-            //input_manager.borrow_mut().on_input(event);
         }) as Box<dyn FnMut(_)>);
         let textarea = document.get_element_by_id("hidden-input").unwrap();
         textarea.add_event_listener_with_callback("input", input_closure.as_ref().unchecked_ref())?;
         input_closure.forget();
-
-        /*
-        let closure = Closure::wrap(Box::new(move |event: KeyboardEvent| {
-            GHOST.with(|ghost| {
-                if let Some(ref mut obj) = *ghost.borrow_mut(){
-                    if obj.as_any().downcast_ref::<TextBox>().is_some(){
-                        info!("input Text Box");
-                        //let tb = obj.as_any_mut().downcast_mut::<TextBox>().unwrap();
-                        let key = event.key();
-                        if key == "Backspace" {
-                            //tb.content.pop(); // ✅ Remove last character
-                        } else if key.len() == 1 {
-                            //tb.content.push_str(&key); // ✅ Append character
-                        }
-                        //redraw(&context_clone);
-                    }
-                }
-            });
-        }) as Box<dyn FnMut(_)>);
-
-        window.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref()).unwrap();
-        closure.forget();
-        */
     }
 
-   { 
+    { 
+        let context_clone = Rc::clone(&piet_ctx);
+
+        let window_clone = window.clone();
         // 커서 깜박임 타이머
         let closure = Closure::wrap(Box::new(move || {
-            TEXTBOXMANAGER.with(|tbm|{
-                if let Some(ref mut manager) = *tbm.borrow_mut() {
-                    manager.toggle_cursor();
-                }
+            let instance = TextBoxManager::instance();
+            let mut tbm = instance.lock().unwrap();
+            STATE.with(|state|{
+                tbm.toggle_cursor(&state.borrow());
             });
         }) as Box<dyn FnMut()>);
 
-        window.set_interval_with_callback_and_timeout_and_arguments_0(closure.as_ref().unchecked_ref(), 500)?; // 500ms마다 깜박임
+        window_clone.set_interval_with_callback_and_timeout_and_arguments_0(closure.as_ref().unchecked_ref(), 500)?; // 500ms마다 깜박임
         closure.forget();
     }
 
@@ -833,7 +598,6 @@ pub fn start() -> Result<(), JsValue> {
                     if let Ok(input) = target.dyn_into::<HtmlInputElement>() {
                         if let Ok(value) = input.value().parse::<f64>() {
                             state_clone.borrow_mut().set_line_width(value);
-                            info!("Line width changed to: {}", state_clone.borrow().line_width()); // 콘솔 출력
                         }
                     }
                 }
@@ -849,14 +613,14 @@ pub fn start() -> Result<(), JsValue> {
 
     // 지우기 버튼 이벤트
     {
-        let context_clone = Rc::new(context.clone());
-
+        let canvas_clone = Rc::new(canvas.clone());
+        let context_clone = Rc::clone(&piet_ctx);
         let closure = Closure::wrap(Box::new(move |_event: web_sys::MouseEvent| {
             let instance = VecDrawDoc::instance();
             let mut doc = instance.lock().unwrap();
             doc.clear();
             STATE.with(|state| {
-                doc.draw(&context_clone, &*state.borrow());
+                doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
             });
         }) as Box<dyn FnMut(_)>);
 
@@ -864,62 +628,6 @@ pub fn start() -> Result<(), JsValue> {
         clear_button.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref()).unwrap();
         closure.forget();
     }
-
-    Ok(())
-}
-
-// keyboard event
-pub fn setup_keyboard_shortcuts() -> Result<(), JsValue> {
-    // 브라우저의 Window 및 Document 객체 가져오기
-    let window = web_sys::window().expect("No global window exists");
-    let document = window.document().expect("Should have a document on window");
-
-    // HTML5 캔버스 가져오기
-    let canvas = document
-        .get_element_by_id("drawing-canvas")
-        .expect("Canvas element not found")
-        .dyn_into::<HtmlCanvasElement>()?;
-
-    // 캔버스 2D 렌더링 컨텍스트 가져오기
-    // ✅ Get 2D Rendering Context
-    let context = canvas
-        .get_context("2d")?
-        .ok_or("Failed to get 2D context")?
-        .dyn_into::<CanvasRenderingContext2d>()?;
-
-    let context_clone = context.clone();
-    let closure = Closure::wrap(Box::new(move |event: KeyboardEvent| {
-        TEXTBOXMANAGER.with(|tbm|{
-            if let Some(ref mut manager) = *tbm.borrow_mut() {
-                if manager.is_active(){
-                    manager.on_keydown(event);
-                }
-                else{
-                    if event.ctrl_key() && event.key() == "a" {
-                        event.prevent_default(); // ✅ Prevent default browser "Select All" behavior
-                        let _ = select_all_shapes(true);
-                    }
-                    else if event.key() == "Escape"{
-                        event.prevent_default(); // ✅ Prevent default behavior
-                        let _ = select_all_shapes(false);
-                    }
-                    else if event.key() == "Delete"{
-                        event.prevent_default();
-
-                        STATE.with(|state| {
-                            let instance = VecDrawDoc::instance();
-                            let mut doc = instance.lock().unwrap();
-                            doc.delete_selected();
-                            doc.draw(&context_clone, &*state.borrow());
-                        });
-                    }
-                }
-            }
-        });
-    }) as Box<dyn FnMut(_)>);
-
-    window.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref()).unwrap();
-    closure.forget();
 
     Ok(())
 }
@@ -950,7 +658,11 @@ fn select_all_shapes(selected: bool) -> Result<(), JsValue> {
     });
 
     STATE.with(|state| {
-        doc.draw(&context, &*state.borrow());
+        PIET_CTX.with(|ctx|{
+            if let Some(ref mut ctx) = *ctx.borrow_mut() {
+                doc.draw(&canvas, &mut ctx.borrow_mut(), &*state.borrow());
+            }
+        });
     });
 
     Ok(())
@@ -1087,13 +799,74 @@ fn setup_mode_buttons() {
     }
 }
 
-fn add_click_listener(element: &web_sys::Element, callback: impl Fn() + 'static) {
-    let closure = Closure::wrap(Box::new(move |_event: web_sys::Event| {
-        callback();
+// keyboard event
+pub fn setup_keyboard_shortcuts() -> Result<(), JsValue> {
+    // 브라우저의 Window 및 Document 객체 가져오기
+    let window = web_sys::window().expect("No global window exists");
+    let document = window.document().expect("Should have a document on window");
+
+    // HTML5 캔버스 가져오기
+    let canvas = document
+        .get_element_by_id("drawing-canvas")
+        .expect("Canvas element not found")
+        .dyn_into::<HtmlCanvasElement>()?;
+
+    // 캔버스 2D 렌더링 컨텍스트 가져오기
+    // ✅ Get 2D Rendering Context
+    let context = canvas
+        .get_context("2d")?
+        .ok_or("Failed to get 2D context")?
+        .dyn_into::<CanvasRenderingContext2d>()?;
+
+    let context_clone = context.clone();
+    let closure = Closure::wrap(Box::new(move |event: KeyboardEvent| {
+        let instance = TextBoxManager::instance();
+        let mut tbm = instance.lock().unwrap();
+        if tbm.is_active(){
+            STATE.with(|state| {
+                let state = state.borrow();
+                tbm.on_keydown(event, &state);
+
+                let instance = VecDrawDoc::instance();
+                let mut doc = instance.lock().unwrap();
+                doc.delete_selected();
+                PIET_CTX.with(|ctx|{
+                    if let Some(ref mut ctx) = *ctx.borrow_mut() {
+                        doc.draw(&canvas, &mut ctx.borrow_mut(), &state);
+                    }
+                });
+            });
+        }
+        else{
+            if event.ctrl_key() && event.key() == "a" {
+                event.prevent_default(); // ✅ Prevent default browser "Select All" behavior
+                let _ = select_all_shapes(true);
+            }
+            else if event.key() == "Escape"{
+                event.prevent_default(); // ✅ Prevent default behavior
+                let _ = select_all_shapes(false);
+            }
+            else if event.key() == "Delete"{
+                event.prevent_default();
+
+                STATE.with(|state| {
+                    let instance = VecDrawDoc::instance();
+                    let mut doc = instance.lock().unwrap();
+                    doc.delete_selected();
+                    PIET_CTX.with(|ctx|{
+                        if let Some(ref mut ctx) = *ctx.borrow_mut() {
+                            doc.draw(&canvas, &mut ctx.borrow_mut(), &*state.borrow());
+                        }
+                    });
+                });
+            }
+        }
     }) as Box<dyn FnMut(_)>);
 
-    element.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref()).unwrap();
+    window.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref()).unwrap();
     closure.forget();
+
+    Ok(())
 }
 
 /* 캔버스 좌표 계산 함수
@@ -1108,6 +881,15 @@ fn calculate_canvas_coordinates(mouse_pos: (f64, f64), scroll: (f64, f64)) -> (f
         let y = (mouse_pos.1 - state.offset().y) / state.scale() + scroll.1;
         return (x, y);
     })
+}
+
+fn add_click_listener(element: &web_sys::Element, callback: impl Fn() + 'static) {
+    let closure = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+        callback();
+    }) as Box<dyn FnMut(_)>);
+
+    element.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref()).unwrap();
+    closure.forget();
 }
 
 fn add_event_listener<T>(canvas: &HtmlCanvasElement, event_type: &str, callback: T) -> Result<(), JsValue>

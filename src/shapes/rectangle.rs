@@ -8,15 +8,20 @@ use std::task::Context;
 use std::thread::panicking;
 use js_sys::Intl::get_canonical_locales;
 use log::info;
+use piet_web::WebRenderContext;
 use wasm_bindgen::convert::FromWasmAbi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use web_sys::{CanvasRenderingContext2d};
 
+use piet::{RenderContext, Color, StrokeStyle};
+use kurbo::Affine;
+
+use crate::state::State;
 use super::geometry::Vector2D;
 use super::geometry::{Point2D};
-use super::shape::{Shape};
+use super::shape::{Shape, hex_to_color};
 
 #[derive(Debug, Clone)]
 pub struct Rectangle{
@@ -222,78 +227,71 @@ impl Shape for Rectangle{
         }
     }
 
-    fn draw(&mut self, context: &CanvasRenderingContext2d, scale: f64){
+    fn draw(&self, context: &mut WebRenderContext, scale: f64){
         context.save();
 
-        context.translate(self.center.x, self.center.y).unwrap();
-        context.rotate(self.rotation).unwrap();
-        context.translate(-self.center.x, -self.center.y).unwrap();
+        context.transform(Affine::translate((self.center.x, self.center.y)));
+        context.transform(Affine::rotate(self.rotation));
+        context.transform(Affine::translate((-self.center.x, -self.center.y)));
 
+        let mut color = hex_to_color(&self.color);
         if self.hovered{
-            context.set_stroke_style(&JsValue::from_str("#ff0000"));
+            color = Color::RED;
         }
-        else{
-            context.set_stroke_style(&JsValue::from_str(&self.color));
-        }
+
         let adjusted_width = self.line_width / scale;
-        context.set_line_width(adjusted_width);
-        context.begin_path();
-        context.rect(self.center.x - self.width * 0.5, self.center.y - self.height * 0.5, self.width, self.height);
-        context.stroke();
+        let rect = piet::kurbo::Rect::new(self.center.x - self.width * 0.5, self.center.y - self.height * 0.5,
+            self.center.x + self.width * 0.5 , self.center.y + self.height * 0.5);
+        context.stroke(rect, &color, adjusted_width);
         
         if self.selected{ self.draw_control_points(context, scale);}
 
         context.restore();
     }   
 
-    fn draw_xor(&self, context: &CanvasRenderingContext2d, scale: f64){
+    fn draw_xor(&self, context: &mut WebRenderContext, state: &State){
         context.save();
 
-        context.set_global_composite_operation("xor").unwrap();
+        // 줌 및 팬 적용 (기존의 scale과 offset 유지)
+        let scale = state.scale();
+        let offset = state.offset();
+        info!("scale = {}, offset = {:?}", scale, offset);
+        context.transform(Affine::new([scale, 0.0, 0.0, scale, offset.x, offset.y]));
 
-        context.begin_path();
-        context.rect(self.center.x - self.width * 0.5, self.center.y - self.height * 0.5, self.width, self.height);
-
-        context.set_stroke_style(&JsValue::from_str(&self.color));
-        let adjusted_width = self.line_width / scale;
-        context.set_line_width(adjusted_width);
-        context.stroke();
+        self.draw(context, scale);
 
         context.restore();
     }
 
     // draw control points and rotation point
-    fn draw_control_points(&self, context: &CanvasRenderingContext2d, scale: f64) {
+    fn draw_control_points(&self, context: &mut WebRenderContext, scale: f64) {
         let adjusted_width = 5.0 / scale;
 
-        context.save();
+        let color = hex_to_color("#29B6F2");
 
         let control_pts = self.control_points();
-        context.set_fill_style(&"#29B6F2".into()); // color of control points
         for point in control_pts{
-            context.fill_rect(point.x - adjusted_width, point.y - adjusted_width, adjusted_width * 2.0, adjusted_width * 2.0);
+            let rect = piet::kurbo::Rect::new(point.x - adjusted_width, point.y - adjusted_width,
+                point.x + adjusted_width, point.y + adjusted_width);
+            context.fill(rect, &color);
         }
 
-        context.set_stroke_style(&"#29B6F2".into()); // color of line
+        // Define stroke style
+        let mut stroke_style = StrokeStyle::new();
+        stroke_style.set_dash_pattern([3.0 / scale, 3.0 / scale]); // Dashed line pattern
+        stroke_style.set_line_cap(piet::LineCap::Round);
+        stroke_style.set_line_join(piet::LineJoin::Bevel);
+
         let adjusted_width = 0.5 / scale;
-        context.set_line_width(adjusted_width);
-
-        // ✅ Set dash pattern: [Dash length, Gap length]
-        let dash_pattern = js_sys::Array::new();
-        dash_pattern.push(&(adjusted_width * 3.0).into());  // dash
-        dash_pattern.push(&(adjusted_width * 3.0).into());  // gap
-        context.set_line_dash(&dash_pattern).unwrap();
-
-        context.begin_path();
-        context.rect(self.center.x - self.width * 0.5, self.center.y - self.height * 0.5, self.width, self.height);
-        context.stroke();
+        let min_pt = self.min_point();
+        let max_pt = self.max_point();
+        let rect = piet::kurbo::Rect::new(min_pt.x, min_pt.y, max_pt.x, max_pt.y);
+        context.stroke_styled(rect, &color, adjusted_width, &stroke_style);
 
         let adjusted_width = 5.0 / scale;
-        context.begin_path();
-        context.arc(self.center.x, self.center.y, adjusted_width, 0.0, std::f64::consts::PI * 2.0).unwrap();
-        context.fill();
+        let cirlce = piet::kurbo::Circle::new(piet::kurbo::Point::new(self.center.x, self.center.y), adjusted_width);
+        context.fill(cirlce, &color);
 
-        context.restore();
     }
 
     fn as_any(&self) -> &dyn Any {

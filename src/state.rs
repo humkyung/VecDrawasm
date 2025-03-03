@@ -1,8 +1,8 @@
 use std::{mem::offset_of, str, fmt};
+use kurbo::Point;
 use log::info;
 
 use crate::shapes::geometry::{Point2D};
-use crate::shapes::shape::{Shape};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ActionMode {
@@ -47,6 +47,7 @@ pub struct State{
     is_panning: bool,
     action_mode: ActionMode,
     drawing_mode: DrawingMode,
+    world_coord: Point,
     color: String,  // 기본 색상: 파란색
     line_width: f64,// 기본 선 굵기
     scale: f64,     // 기본 스케일
@@ -61,6 +62,7 @@ impl State{
             is_panning: false,
             action_mode: ActionMode::Drawing,
             drawing_mode: DrawingMode::Line,
+            world_coord: Point::ORIGIN,
             color: color,
             line_width: line_width,
             scale: 1.0,
@@ -88,6 +90,14 @@ impl State{
 
     pub fn set_line_width(&mut self, value: f64) {
         self.line_width = value;
+    }
+
+    pub fn world_coord(&self) -> Point{
+        self.world_coord
+    }
+
+    pub fn set_world_coord(&mut self, value: Point){
+        self.world_coord = value;
     }
 
     pub fn scale(&self) -> f64 {
