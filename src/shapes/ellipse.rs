@@ -248,7 +248,7 @@ impl Shape for Ellipse{
     }   
 
     fn draw_xor(&self, context: &mut WebRenderContext, state: &State){
-        context.save();
+        let _ = context.save();
 
         // 줌 및 팬 적용 (기존의 scale과 offset 유지)
         let scale = state.scale();
@@ -257,7 +257,7 @@ impl Shape for Ellipse{
 
         self.draw(context, scale);
 
-        context.restore();
+        let _ = context.restore();
     }
 
     fn draw_control_points(&self, context: &mut WebRenderContext, scale: f64) {

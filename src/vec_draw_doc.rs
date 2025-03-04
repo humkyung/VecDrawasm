@@ -173,7 +173,7 @@ impl VecDrawDoc {
     }
 
     /// 눈금자를 그린다.
-    fn draw_ruler(&self, ctx: &mut WebRenderContext, width: f64, height: f64, word_coord: Point) {
+    fn draw_ruler(&self, ctx: &mut WebRenderContext, width: f64, height: f64, word_coord: Point2D) {
         let tick_interval = 10.0;
         let major_tick_interval = 50.0;
         let text_offset = 12.0;

@@ -27,7 +27,8 @@ pub enum DrawingMode {
     Line,
     Rectangle,
     Ellipse,
-    Text
+    CubicBez,
+    Text,
 }
 
 impl fmt::Display for DrawingMode {
@@ -37,6 +38,7 @@ impl fmt::Display for DrawingMode {
             DrawingMode::Line => write!(f, "Line Mode"),
             DrawingMode::Rectangle => write!(f, "Rectangle Mode"),
             DrawingMode::Ellipse => write!(f, "Ellipse Mode"),
+            DrawingMode::CubicBez => write!(f, "CubicBez Mode"),
             DrawingMode::Text => write!(f, "Text Mode"),
         }
     }
@@ -47,7 +49,7 @@ pub struct State{
     is_panning: bool,
     action_mode: ActionMode,
     drawing_mode: DrawingMode,
-    world_coord: Point,
+    world_coord: Point2D,
     color: String,  // 기본 색상: 파란색
     background: Option<String>, // 배경색
     line_width: f64,// 기본 선 굵기
@@ -61,9 +63,9 @@ impl State{
     pub fn new(color: String, line_width: f64) -> Self {
         State {
             is_panning: false,
-            action_mode: ActionMode::Selection,
-            drawing_mode: DrawingMode::Line,
-            world_coord: Point::ORIGIN,
+            action_mode: ActionMode::Drawing,
+            drawing_mode: DrawingMode::CubicBez,
+            world_coord: Point2D::new(0.0,  0.0),
             color: color,
             background: None,
             line_width: line_width,
@@ -102,11 +104,11 @@ impl State{
         self.background = value;
     }
 
-    pub fn world_coord(&self) -> Point{
+    pub fn world_coord(&self) -> Point2D{
         self.world_coord
     }
 
-    pub fn set_world_coord(&mut self, value: Point){
+    pub fn set_world_coord(&mut self, value: Point2D){
         self.world_coord = value;
     }
 
@@ -139,16 +141,16 @@ impl State{
         self.is_panning = value.clone();
     }
 
-    pub fn action_mode(&self) -> &ActionMode {
-        &self.action_mode
+    pub fn action_mode(&self) -> ActionMode {
+        self.action_mode
     }
 
     pub fn set_action_mode(&mut self, value: &ActionMode) {
         self.action_mode = value.clone();
     }
 
-    pub fn drawing_mode(&self) -> &DrawingMode{
-        &self.drawing_mode
+    pub fn drawing_mode(&self) -> DrawingMode{
+        self.drawing_mode
     }
 
     pub fn set_drawing_mode(&mut self, value: &DrawingMode) {
