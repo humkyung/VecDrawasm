@@ -810,15 +810,29 @@ fn draw_xor(drawing_mode: DrawingMode, points: Vec<Point2D>, end: Point2D){
                         ctx.stroke_styled(ellipse, &color, adjusted_width, &stroke_style);
                     }
                     DrawingMode::CubicBez=>{
-                        let mut path = piet::kurbo::BezPath::new();
-                        path.move_to(Point::new(points.first().unwrap().x, points.first().unwrap().y));
+                        if points.len() == 3{
+                            let p0 = points.get(0).unwrap();
+                            let p1 = points.get(1).unwrap();
+                            let p2 = points.get(2).unwrap();
 
-                        for point in points.iter().skip(1) {
-                            path.line_to(Point::new(point.x, point.y));
+                            let bezier = piet::kurbo::CubicBez::new(
+                                kurbo::Point::new(p0.x, p0.y),
+                                kurbo::Point::new(p1.x, p1.y), 
+                                kurbo::Point::new(p2.x, p2.y),
+                                kurbo::Point::new(end.x, end.y));
+                            ctx.stroke_styled(bezier, &color, adjusted_width, &stroke_style);
                         }
-                        path.line_to(Point::new(end.x, end.y));
+                        else{
+                            let mut path = piet::kurbo::BezPath::new();
+                            path.move_to(Point::new(points.first().unwrap().x, points.first().unwrap().y));
 
-                        ctx.stroke_styled(path, &color, adjusted_width, &stroke_style);
+                            for point in points.iter().skip(1) {
+                                path.line_to(Point::new(point.x, point.y));
+                            }
+                            path.line_to(Point::new(end.x, end.y));
+
+                            ctx.stroke_styled(path, &color, adjusted_width, &stroke_style);
+                        }
                     }
                     _ =>{ }
                 }
