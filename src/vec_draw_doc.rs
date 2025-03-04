@@ -285,10 +285,10 @@ impl VecDrawDoc {
         let bound_rect = self.bounding_rect().unwrap();
         let width = bound_rect.width();
         let height = bound_rect.height();
-        let mut svg_content = String::from(format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}">"#));
+        let mut svg_content = String::from(format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}">"#) + "\n");
 
         self.shapes.iter().for_each(|shape|{
-            let svg = shape.lock().unwrap().to_svg();
+            let svg = shape.lock().unwrap().to_svg(bound_rect) + "\n";
             svg_content.push_str(&svg);
         });
         svg_content.push_str("</svg>");

@@ -1,4 +1,4 @@
-use std::ops::{self, Add, AddAssign, Mul};
+use std::ops::{self, Add, AddAssign, Sub, SubAssign, Mul};
 
 use kurbo::Point;
 
@@ -19,6 +19,10 @@ impl Point2D{
     pub fn set_y(&mut self, value: f64){
         self.y = value;
     }
+
+    pub fn to_string(&self) -> String{
+        format!(r#"{:.3},{:.3}"#, self.x, self.y)
+    }
 }
 impl Add<Point2D> for Point2D{
     type Output = Self;
@@ -37,6 +41,22 @@ impl AddAssign<Vector2D> for Point2D{
     fn add_assign(&mut self, rhs: Vector2D) {
         self.x += rhs.x;
         self.y += rhs.y;
+    }
+}
+impl Sub for Point2D {
+    type Output = Point2D;
+
+    fn sub(self, other: Point2D) -> Point2D {
+        Point2D {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+}
+impl SubAssign for Point2D {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.x -= rhs.x;
+        self.y -= rhs.y;    
     }
 }
 

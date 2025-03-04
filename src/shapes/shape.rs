@@ -41,7 +41,7 @@ pub trait Shape : Send + Sync + Any{
     fn draw(&self, context: &mut WebRenderContext, scale: f64);
     fn draw_xor(&self, context: &mut WebRenderContext, state: &State);
     fn draw_control_points(&self, context: &mut WebRenderContext, scale: f64);
-    fn to_svg(&self) -> String;
+    fn to_svg(&self, rect: BoundingRect2D) -> String;
     fn as_any(&self) -> &dyn Any;   // ✅ Needed for downcasting
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }

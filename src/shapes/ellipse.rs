@@ -288,7 +288,7 @@ impl Shape for Ellipse{
         context.fill(cirlce, &color);
     }
 
-    fn to_svg(&self) -> String{
+    fn to_svg(&self, rect: BoundingRect2D) -> String{
         "".to_string()
     }
 

@@ -7,7 +7,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::console::clear;
 use web_sys::{window, CanvasRenderingContext2d, HtmlElement, HtmlCanvasElement, HtmlInputElement, MouseEvent, WheelEvent, KeyboardEvent, CompositionEvent,
-     InputEvent, Blob, Url, HtmlAnchorElement};
+     InputEvent, Blob, BlobPropertyBag, Url, HtmlAnchorElement};
 use log::info;
 
 use std::cell::RefCell;
@@ -1040,7 +1040,14 @@ pub fn download_svg(filename: &str) {
     let doc = instance.lock().unwrap();
     let svg_content = doc.to_svg();
 
-    let blob = Blob::new_with_str_sequence(&wasm_bindgen::JsValue::from(svg_content))
+    // 🔥 수정된 부분: 문자열을 `vec![...]`로 감싸서 배열 형태로 전달
+    let array = js_sys::Array::new();
+    array.push(&JsValue::from(svg_content));
+
+    let mut options = BlobPropertyBag::new();
+    options.type_("image/svg+xml");
+
+    let blob = Blob::new_with_str_sequence_and_options(&array, &options)
         .expect("Failed to create Blob");
     
     let url = Url::create_object_url_with_blob(&blob).expect("Failed to create URL");

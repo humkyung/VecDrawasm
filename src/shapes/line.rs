@@ -184,7 +184,7 @@ impl Shape for Line{
         context.fill(rect, &Color::RED);
     }
 
-    fn to_svg(&self) -> String{
+    fn to_svg(&self, rect: BoundingRect2D) -> String{
         "".to_string()
     }
 

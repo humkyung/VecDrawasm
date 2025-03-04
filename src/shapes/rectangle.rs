@@ -13,8 +13,6 @@ use wasm_bindgen::convert::FromWasmAbi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use web_sys::{CanvasRenderingContext2d};
-
 use piet::{RenderContext, Color, StrokeStyle};
 use kurbo::Affine;
 
@@ -96,12 +94,12 @@ impl Shape for Rectangle{
         self.line_width
     }
 
-    fn max_point(&self) -> Point2D{
-        Point2D::new(self.center.x + self.width * 0.5, self.center.y + self.height * 0.5)
-    }
-
     fn min_point(&self) -> Point2D{
         Point2D::new(self.center.x - self.width * 0.5, self.center.y - self.height * 0.5)
+    }
+
+    fn max_point(&self) -> Point2D{
+        Point2D::new(self.center.x + self.width * 0.5, self.center.y + self.height * 0.5)
     }
 
     fn bounding_rect(&self) -> super::geometry::BoundingRect2D {
@@ -258,7 +256,7 @@ impl Shape for Rectangle{
     }   
 
     fn draw_xor(&self, context: &mut WebRenderContext, state: &State){
-        context.save();
+        let _ = context.save();
 
         // 줌 및 팬 적용 (기존의 scale과 offset 유지)
         let scale = state.scale();
@@ -268,7 +266,7 @@ impl Shape for Rectangle{
 
         self.draw(context, scale);
 
-        context.restore();
+        let _ = context.restore();
     }
 
     // draw control points and rotation point
@@ -302,14 +300,27 @@ impl Shape for Rectangle{
 
     }
 
-    fn to_svg(&self) -> String{
+    // svg 텍스트를 반환한다.
+    fn to_svg(&self, rect: BoundingRect2D) -> String{
+        let origin = rect.min();
+        let min = self.min_point();
+
+        let mut style = "".to_string();
+        if let Some(ref background) = self.background{
+            style = format!(r#"fill:{background};stroke:{color}"#, 
+            background = background, color = self.color);
+        }
+        else{
+            style = format!(r#"fill:none;stroke:{color}"#, color = self.color);
+        }
+
         format!(
-                r#"<rect x="{x}" y="{y}" width="{width}" height="{height}" fill="{color}"/>"#,
-                x = self.center.x - self.width,
-                y = self.center.y - self.height,
+                r#"<rect x="{x}" y="{y}" width="{width}" height="{height}" style="{style}"/>"#,
+                x = min.x - origin.x,
+                y = min.y - origin.y,
                 width = self.width,
-                height = self.height,
-                color = self.color)
+                height = self.height)
+
     }
 
     fn as_any(&self) -> &dyn Any {

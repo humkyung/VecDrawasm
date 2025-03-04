@@ -204,8 +204,27 @@ impl Shape for Pencil{
         context.stroke_styled(rect, &Color::RED, adjusted_width, &stroke_style);
     }
 
-    fn to_svg(&self) -> String{
-        "".to_string()
+    // svg 문자열을 반환한다.
+    fn to_svg(&self, rect: BoundingRect2D) -> String{
+        let origin = rect.min();
+        let min = self.min_point();
+
+        let mut style = "".to_string();
+        if let Some(ref background) = self.background{
+            style = format!(r#"fill:{background};stroke:{color}"#, 
+            background = background, color = self.color);
+        }
+        else{
+            style = format!(r#"fill:none;stroke:{color}"#, color = self.color);
+        }
+
+        let mut svg = "<polyline points=\"".to_string();
+        let point_strings: Vec<String> = self.points.iter().map(|pt| (*pt - origin).to_string()).collect();
+        svg.push_str(&point_strings.join(" "));
+        svg.push_str("\" ");
+        svg.push_str(format!(r#"style="{}"/>"#, style).as_str());
+
+        svg
     }
 
     fn as_any(&self) -> &dyn Any {
