@@ -184,8 +184,22 @@ impl Shape for Line{
         context.fill(rect, &Color::RED);
     }
 
+    // svg 문자열을 반환한다.
     fn to_svg(&self, rect: BoundingRect2D) -> String{
-        "".to_string()
+        let origin = rect.min();
+
+        let style = format!(r#"fill:none;stroke:{color}"#, color = self.color);
+
+        let mut svg = "<line ".to_string();
+        let content = format!(r#"x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}""#, 
+        x1 = self.start.x - origin.x, 
+        y1 = self.start.y - origin.y, 
+        x2 = self.end.x - origin.x, 
+        y2 = self.end.y - origin.y);
+        svg.push_str(&content);
+        svg.push_str(format!(r#" style="{}"/>"#, style).as_str());
+
+        svg
     }
 
     fn as_any(&self) -> &dyn Any {

@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::f64::MAX;
+use std::fmt::format;
 use std::iter::Scan;
 use std::str;
 use std::task::Context;
@@ -288,8 +289,29 @@ impl Shape for Ellipse{
         context.fill(cirlce, &color);
     }
 
+    // svg 문자열을 반환한다.
     fn to_svg(&self, rect: BoundingRect2D) -> String{
-        "".to_string()
+        let origin = rect.min();
+
+        let mut style = "".to_string();
+        if let Some(ref background) = self.background{
+            style = format!(r#"fill:{background};stroke:{color}"#, 
+            background = background, color = self.color);
+        }
+        else{
+            style = format!(r#"fill:none;stroke:{color}"#, color = self.color);
+        }
+
+        let mut svg = "<ellipse ".to_string();
+        let content = format!(r#"cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}""#, 
+        cx = self.center.x - origin.x, 
+        cy= self.center.y - origin.y, 
+        rx = self.radius_x, 
+        ry = self.radius_y);
+        svg.push_str(&content);
+        svg.push_str(format!(r#" style="{}"/>"#, style).as_str());
+
+        svg
     }
 
     fn as_any(&self) -> &dyn Any {
