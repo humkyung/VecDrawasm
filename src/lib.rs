@@ -890,6 +890,7 @@ fn setup_mode_buttons() {
     let line_button = document.get_element_by_id("line-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
     let rectangle_button = document.get_element_by_id("rectangle-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
     let ellipse_button = document.get_element_by_id("ellipse-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+    let bezier_button = document.get_element_by_id("bezier-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
     let text_button = document.get_element_by_id("text-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
 
     // Function to update active button UI
@@ -908,6 +909,7 @@ fn setup_mode_buttons() {
         line_button.set_class_name("");
         rectangle_button.set_class_name("");
         ellipse_button.set_class_name("");
+        bezier_button.set_class_name("");
         text_button.set_class_name("");
 
         active_button.set_class_name("active");
@@ -992,6 +994,20 @@ fn setup_mode_buttons() {
                 state.borrow_mut().set_drawing_mode(&DrawingMode::Ellipse);
             });
             update_ui_clone(&ellipse_button_clone);
+        });
+    }
+
+    // Bezier mode Handler
+    {
+        let bezier_button = document.get_element_by_id("bezier-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+        let bezier_button_clone = bezier_button.clone();
+        let update_ui_clone = update_ui.clone();
+        add_click_listener(&bezier_button, move || {
+            STATE.with(|state| {
+                state.borrow_mut().set_action_mode(&ActionMode::Drawing);
+                state.borrow_mut().set_drawing_mode(&DrawingMode::CubicBez);
+            });
+            update_ui_clone(&bezier_button_clone);
         });
     }
 

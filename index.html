@@ -1,11 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
-  <title>DrawBoard</title>
-  <script type="module">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DrawBoard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link rel="stylesheet" href="/styles/index.css">
+    <link rel="stylesheet" href="/static/styles/index.css">
+    <script type="module">
         import init, {download_svg} from './pkg/vector_drawing_webapp.js';
 
         async function start() {
@@ -17,8 +20,8 @@
               const canvas = document.getElementById("drawing-canvas");
               const toolbar = document.getElementById("toobar");
 
-              canvas.width = window.innerWidth - 300;
-              canvas.height = window.innerHeight - 50;
+              canvas.width = window.innerWidth - 260;
+              canvas.height = window.innerHeight - 76;
           }
 
           window.addEventListener("resize", resizeCanvas);
@@ -110,292 +113,162 @@
         });
         */
     </script> 
-  <style>
-    body {
-      margin: 0;
-      display: flex;
-      height: 100vh;
-      background-color: #f0f0f0;
-      overflow: hidden; /* Prevent scrollbars */
-    }
-
-    /* 🎨 Floating Toolbar */
-    .toolbar {
-      display: flex;
-      align-items: center;
-      padding: 8px;
-      border: 1px solid #ccc;
-      background: #f9f9f9;
-      box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.1);
-      /*
-        position: absolute;
-        top: 10px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(255, 255, 255, 0.9);
-        padding: 10px;
-        border-radius: 10px;
-        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
-        display: flex;
-        gap: 8px;
-        z-index: 10;
-      */
-    }
-    .toolbar button, .toolbar select, .toolbar input {
-          border: none;
-          background: none;
-          cursor: pointer;
-          margin: 0 5px;
-          padding: 5px;
-    }
-    .toolbar button:hover, .toolbar select:hover, .toolbar input:hover {
-        background: rgba(0, 0, 0, 0.1);
-        border-radius: 4px;
-    }
-    .toolbar button:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-    .toolbar select, .toolbar input {
-        border: 1px solid #ccc;
-        padding: 3px;
-        border-radius: 4px;
-    }
-    .toolbar .divider {
-        width: 1px;
-        height: 20px;
-        background: #ccc;
-        margin: 0 8px;
-    }
-
-    /* 🎯 왼쪽 라이브러리 패널 */
-    .library-panel {
-      width: 200px;
-      background: #ffffff;
-      border-right: 1px solid #ccc;
-      padding: 10px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 10px;
-      box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
-      position: fixed;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      overflow-y: auto;
-    }
-
-    .library-panel h3 {
-      margin: 0;
-      font-size: 16px;
-    }
-
-    .library-item {
-      width: 100%;
-      padding: 5px;
-      text-align: center;
-      cursor: pointer;
-      border: 1px solid #ccc;
-      border-radius: 5px;
-      background: #f9f9f9;
-      transition: background 0.2s;
-    }
-
-    .library-item img {
-      width: 80%;
-      max-height: 80px;
-      object-fit: contain;
-    }
-
-    .library-item:hover {
-      background: #e0e0e0;
-    }
-
-    .library-item.selected {
-      background: #ffdddd;
-      border: 2px solid red;
-    }
-
-    /* 🎨 드래그 앤 드롭 스타일 */
-    .library-panel.dragover {
-      border: 2px dashed #007bff;
-      background: #e0f7ff;
-    }
-
-    /* 🎛 컨트롤 패널 (라이브러리 오른쪽으로 이동) */
-    .controls-container {
-      width: calc(100% - 200px); /* 라이브러리 패널 제외한 너비 */
-      margin-left: 200px; /* 🎯 라이브러리 패널과 겹치지 않도록 조정 */
-      display: flex;
-      justify-content: center;
-      padding: 10px 0;
-      background: rgba(255, 255, 255, 0.9);
-      box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.1);
-      position: fixed;
-      top: 0;
-      left: 200px; /* 🎯 라이브러리 패널 다음 위치로 이동 */
-      z-index: 10;
-    }
-
-    .controls {
-      position: absolute;
-      top: 0;
-      display: flex;
-      gap: 10px;
-      background: rgba(255, 255, 255, 0.8);
-      padding: 5px 10px;
-      border-radius: 5px;
-      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-      width: auto;
-    }
-
-    .controls input,
-    .controls button {
-      padding: 5px;
-      border: 1px solid #ccc;
-      border-radius: 3px;
-      cursor: pointer;
-    }
-
-    button {
-        margin: 5px;
-        padding: 10px;
-        font-size: 14px;
-        cursor: pointer;
-        border: 2px solid #333;
-        background-color: #f0f0f0;
-    }
-    button.active {
-        background-color: #4CAF50;
-        color: white;
-    }
-
-    .save-btn {
-      margin-left: auto; /* 🎯 저장 버튼을 오른쪽 정렬 */
-    }
-
-    /* 🎨 메인 레이아웃 (캔버스 컨테이너) */
-    .main-container {
-      flex-grow: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      position: relative;
-      margin-left: 200px; /* 🎯 라이브러리 패널과 겹치지 않게 조정 */
-      padding-top: 0px; /* 🎯 컨트롤 패널과 캔버스가 겹치지 않도록 조정 */
-    }
-
-    /* 🎨 Canvas Styling */
-    .canvas-container {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-
-    canvas {
-        display: block;
-        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
-        width: 100%;
-        height: 100%;
-        border: none;
-    }
-
-    #fillColorPreview {
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        border: 1px solid #000;
-        display: inline-block;
-    }
-    .transparent {
-      background: repeating-conic-gradient(
-          #ccc 0% 25%, #fff 25% 50%
-      );
-      background-size: 6px 6px;
-    }
-
-    /* 🖱 Cursor styles */
-    .cursor-default { cursor: default; }
-    .cursor-pointer { cursor: pointer; }
-    .cursor-crosshair { cursor: crosshair; }
-    .cursor-move { cursor: move; }
-  </style>
 </head>
-
 <body>
-    <!-- 🎯 왼쪽 라이브러리 패널 (드래그 앤 드롭 가능) -->
-    <div class="library-panel" id="library-panel">
-        <h3>📁 나의 그림들</h3>
-        <p>그림 파일을 여기에 드래그하세요</p>
+    <div class="navbar">
+        <span>DrawBoard</span>
     </div>
+    <div class="toolbar">
+        <button id="save-btn" title="Save"><i class="fas fa-save"></i></button>
+        <button id="export-btn" title="Export"><i class="fas fa-download"></i></button>
 
+		<div class="divider"></div>
+        
+        <button disabled title="Copy"><i class="fas fa-copy"></i></button>
+        <button disabled title="Cut"><i class="fas fa-cut"></i></button>
+        <button title="Paste"><i class="fas fa-paste"></i></button>
+        
+        <div class="divider"></div>
+        
+        <button id="fit-btn" title="fit">
+            <svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 354 354" width="14" height="14">
+                <path d="M307.4,17.2H46.6c-20.8,0-37.6,16.8-37.6,37.6v244.4c0,20.8,16.8,37.6,37.6,37.6h260.8c20.8,0,37.6-16.8,37.6-37.6V54.8c0-20.8-16.8-37.6-37.6-37.6ZM137,228.9l-31.6,31.6h6.2c3.9,0,7.5,1.6,10.1,4.2,2.6,2.6,4.2,6.1,4.2,10.1,0,7.9-6.4,14.2-14.2,14.2h-37.8c-.9.2-1.8.3-2.7.3-4,0-7.6-1.7-10.2-4.3-2.7-2.6-4.3-6.2-4.3-10.2,0-.9,0-1.9.3-2.7v-37.8c0-7.9,6.4-14.2,14.2-14.2,3.9,0,7.5,1.6,10.1,4.2,2.6,2.6,4.2,6.1,4.2,10.1v6.2l31.6-31.6c5.6-5.6,14.6-5.6,20.1,0,5.6,5.6,5.6,14.6,0,20.1ZM137,145.2c-5.6,5.6-14.6,5.6-20.1,0l-31.6-31.6v6.2c0,3.9-1.6,7.5-4.2,10.1-2.6,2.6-6.1,4.2-10.1,4.2-7.9,0-14.2-6.4-14.2-14.2v-37.8c-.2-.9-.3-1.8-.3-2.7,0-4,1.7-7.6,4.3-10.2,2.6-2.7,6.2-4.3,10.2-4.3.9,0,1.9,0,2.7.3h37.8c7.9,0,14.2,6.4,14.2,14.2,0,3.9-1.6,7.5-4.2,10.1-2.6,2.6-6.1,4.2-10.1,4.2h-6.2l31.6,31.6c5.6,5.6,5.6,14.6,0,20.1ZM293.2,285c-2.6,2.7-6.2,4.3-10.2,4.3-.9,0-1.9,0-2.7-.3h-37.8c-7.9,0-14.2-6.4-14.2-14.2,0-3.9,1.6-7.5,4.2-10.1s6.1-4.2,10.1-4.2h6.2l-31.6-31.6c-5.6-5.6-5.6-14.6,0-20.1,5.6-5.6,14.6-5.6,20.1,0l31.6,31.6v-6.2c0-3.9,1.6-7.5,4.2-10.1s6.1-4.2,10.1-4.2c7.9,0,14.2,6.4,14.2,14.2v37.8c.2.9.3,1.8.3,2.7,0,4-1.7,7.6-4.3,10.2ZM297.3,81.9v37.8c0,7.9-6.4,14.2-14.2,14.2-3.9,0-7.5-1.6-10.1-4.2s-4.2-6.1-4.2-10.1v-6.2l-31.6,31.6c-5.6,5.6-14.6,5.6-20.1,0-5.6-5.6-5.6-14.6,0-20.1l31.6-31.6h-6.2c-3.9,0-7.5-1.6-10.1-4.2s-4.2-6.1-4.2-10.1c0-7.9,6.4-14.2,14.2-14.2h37.8c.9-.2,1.8-.3,2.7-.3,4,0,7.6,1.7,10.2,4.3,2.7,2.6,4.3,6.2,4.3,10.2s0,1.9-.3,2.7Z"/>
+            </svg>
+        </button>
+        <button id="clear-btn" title="Clear">
+            <i class="fas fa-circle-xmark"></i>
+        </button>
+
+        <div class="divider"></div>
+	  
+        <button id="selection-mode" class="active" title="Selection">
+            <i class="fas fa-mouse-pointer"></i>
+        </button>
+        <button id="eraser-mode" title="Eraser">
+            <i class="fas fa-eraser"></i>
+        </button>
+        <button id="pencil-mode" title="Pencil">
+            <i class="fas fa-pencil"></i> 
+        </button>
+        <button id="line-mode" title="Line">
+            <i class="fas fa-ruler"></i>
+        </button>
+
+        <button id="polygon-mode" title="Polygon">
+            <svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 354 354" width="14" height="14">
+                <path d="M246.8,56.1l69.8,120.9-69.8,120.9H107.2l-69.8-120.9L107.2,56.1h139.6M263.5,27.1H90.5L3.9,177l86.5,149.9h173.1l86.5-149.9L263.5,27.1h0Z"/>
+                <polygon points="90.5 27.1 3.9 177 90.5 326.9 177 326.9 177 27.1 90.5 27.1">
+            </svg>    
+        </button>
+        <button id="rectangle-mode" title="Rectangle">
+            <i class="fa-regular fa-square"></i>
+        </button>
+        <button id="ellipse-mode" title="Ellipse">
+            <i class="fa-regular fa-circle"></i>
+        </button>
+
+	    <button id="arc-mode" title="Arc">
+            <svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 354 354" width="14" height="14">
+                <path d="M293.9,249.3c11.4,0,20.6,9.3,20.6,20.6s-9.3,20.6-20.6,20.6-20.6-9.3-20.6-20.6,9.3-20.6,20.6-20.6M293.9,219.3c-28,0-50.6,22.7-50.6,50.6s22.7,50.6,50.6,50.6,50.6-22.7,50.6-50.6-22.7-50.6-50.6-50.6h0Z"/>
+                <path d="M60.1,249.3c11.4,0,20.6,9.3,20.6,20.6s-9.3,20.6-20.6,20.6-20.6-9.3-20.6-20.6,9.3-20.6,20.6-20.6M60.1,219.3c-28,0-50.6,22.7-50.6,50.6s22.7,50.6,50.6,50.6,50.6-22.7,50.6-50.6-22.7-50.6-50.6-50.6h0Z"/>
+                <g>
+                  <path class="st0" d="M171.3,103.7c2,.7,4.2,1,6.4,1s4.4-.4,6.4-1c-2.1-.2-4.3-.3-6.4-.3s-4.3.1-6.4.3Z"/>
+                  <path class="st0" d="M168.2,65.8c3.2-.3,6.3-.4,9.5-.4s6.4.2,9.5.4c-2.9-1.5-6.1-2.4-9.5-2.4s-6.7.9-9.5,2.4Z"/>
+                  <path d="M127.4,78.2c-17.7,9.5-33.7,24.1-47.3,43.3-24.2,34.2-37.5,79.3-37.5,127.1h38c0-40,10.8-77.3,30.5-105.2,8.1-11.5,17.3-20.7,27.2-27.4-7.1-8.7-11.4-19.8-11.4-31.9s.1-3.9.3-5.8Z"/>
+                  <path d="M275.2,121.5c-13.5-19.2-29.6-33.8-47.3-43.3.2,1.9.3,3.9.3,5.8,0,12.1-4.3,23.2-11.4,31.9,9.9,6.7,19.1,15.9,27.2,27.4,19.7,27.8,30.5,65.2,30.5,105.2h38c0-47.8-13.3-92.9-37.5-127.1Z"/>
+                  <path d="M177.7,63.4c3.4,0,6.7.9,9.5,2.4,14.2,1.3,27.9,5.5,40.8,12.4-2.9-25.2-24.3-44.8-50.3-44.8s-47.4,19.6-50.3,44.8c12.9-6.9,26.6-11.1,40.8-12.4,2.9-1.5,6.1-2.4,9.5-2.4Z"/>
+                  <path d="M177.7,104.7c-2.2,0-4.4-.4-6.4-1-11.4,1.1-22.5,5.4-32.9,12.3,9.3,11.4,23.4,18.7,39.3,18.7s30-7.3,39.3-18.7c-10.4-7-21.5-11.2-32.9-12.3-2,.7-4.2,1-6.4,1Z"/>
+                  <path d="M157.1,84.1c0-7.9,4.5-14.8,11.1-18.3-14.2,1.3-27.9,5.5-40.8,12.4-.2,1.9-.3,3.9-.3,5.8,0,12.1,4.3,23.2,11.4,31.9,10.4-7,21.5-11.2,32.9-12.3-8.2-2.7-14.2-10.5-14.2-19.6Z"/>
+                  <path d="M228,78.2c-12.9-6.9-26.6-11.1-40.8-12.4,6.6,3.4,11.1,10.3,11.1,18.3s-6,16.9-14.2,19.6c11.4,1.1,22.5,5.4,32.9,12.3,7.1-8.7,11.4-19.8,11.4-31.9s-.1-3.9-.3-5.8Z"/>
+                </g>
+            </svg>              
+        </button>
+		<button id="bezier-mode" title="Bezier">
+            <svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 354 354" width="14" height="14">
+                <path d="M293.9,249.3c11.4,0,20.6,9.3,20.6,20.6s-9.3,20.6-20.6,20.6-20.6-9.3-20.6-20.6,9.3-20.6,20.6-20.6M293.9,219.3c-28,0-50.6,22.7-50.6,50.6s22.7,50.6,50.6,50.6,50.6-22.7,50.6-50.6-22.7-50.6-50.6-50.6h0Z"/>
+                <path d="M60.1,249.3c11.4,0,20.6,9.3,20.6,20.6s-9.3,20.6-20.6,20.6-20.6-9.3-20.6-20.6,9.3-20.6,20.6-20.6M60.1,219.3c-28,0-50.6,22.7-50.6,50.6s22.7,50.6,50.6,50.6,50.6-22.7,50.6-50.6-22.7-50.6-50.6-50.6h0Z"/>
+                <path class="st0" d="M169.1,65.3h17.2c-2.6-1.2-5.5-1.9-8.6-1.9s-6,.7-8.6,1.9Z"/>
+                <path class="st0" d="M171.3,103.7c2,.7,4.2,1,6.4,1s4.4-.4,6.4-1c-2.1-.2-4.3-.3-6.4-.3s-4.3.1-6.4.3Z"/>
+                <path class="st0" d="M90.6,108.2c1.6-1.9,3.3-3.7,4.9-5.4h-1.9c-.9,1.9-1.9,3.7-3,5.4Z"/>
+                <path class="st0" d="M259.9,102.8c.4.4.8.8,1.1,1.2-.2-.4-.4-.8-.6-1.2h-.5Z"/>
+                <path d="M177.7,63.4c3.1,0,6,.7,8.6,1.9h38.4c-7.4-18.7-25.7-31.9-47-31.9s-39.6,13.2-47,31.9h38.4c2.6-1.2,5.5-1.9,8.6-1.9Z"/>
+                <path d="M177.7,104.7c-2.2,0-4.4-.4-6.4-1-11.4,1.1-22.5,5.4-32.9,12.3,9.3,11.4,23.4,18.7,39.3,18.7s30-7.3,39.3-18.7c-10.4-7-21.5-11.2-32.9-12.3-2,.7-4.2,1-6.4,1Z"/>
+                <path d="M344.5,84.1c0-24.4-19.8-44.1-44.1-44.1s-32.9,10.4-40,25.4h-35.7c2.3,5.8,3.6,12.1,3.6,18.7,0,12.1-4.3,23.2-11.4,31.9,9.9,6.7,19.1,15.9,27.2,27.4,19.7,27.8,30.5,65.2,30.5,105.2h38c0-47.8-13.3-92.9-37.5-127.1-.6-.8-1.2-1.7-1.8-2.5,7.5,5.8,16.8,9.2,26.9,9.2,24.4,0,44.1-19.8,44.1-44.1ZM259.9,102.8h.5c.2.4.4.8.6,1.2-.4-.4-.8-.8-1.1-1.2Z"/>
+                <path d="M130.6,65.3h-37.1c-7-15-22.3-25.4-40-25.4S9.5,59.7,9.5,84.1s19.8,44.1,44.1,44.1,22.9-4.8,30.9-12.6c-1.5,1.9-2.9,3.9-4.4,5.9-24.2,34.2-37.5,79.3-37.5,127.1h38c0-40,10.8-77.3,30.5-105.2,8.1-11.5,17.3-20.7,27.2-27.4-7.1-8.7-11.4-19.8-11.4-31.9s1.3-12.9,3.6-18.7ZM90.6,108.2c1.1-1.7,2.1-3.5,3-5.4h1.9c-1.7,1.7-3.3,3.5-4.9,5.4Z"/>
+                <path d="M224.7,65.3h-38.4c7.1,3.3,12,10.4,12,18.7s-6,16.9-14.2,19.6c11.4,1.1,22.5,5.4,32.9,12.3,7.1-8.7,11.4-19.8,11.4-31.9s-1.3-12.9-3.6-18.7Z"/>
+                <path d="M157.1,84.1c0-8.3,4.9-15.5,12-18.7h-38.4c-2.3,5.8-3.6,12.1-3.6,18.7,0,12.1,4.3,23.2,11.4,31.9,10.4-7,21.5-11.2,32.9-12.3-8.2-2.7-14.2-10.5-14.2-19.6Z"/>
+            </svg>              
+        </button>
+
+	  <div class="divider"></div>
+
+      <select class="font-style">
+		<option value="arial">Arial</option>
+		<option>Verdana</option>
+		<option>Times New Roman</option>
+	  </select>
+	  <input type="number" value="20" min="1" max="50" class="font-size" />
+	  <button id="text-mode">🔤</button> <!-- ✅ Added Text Input Button -->
+	  <div class="divider"></div>
+
+	  <input type="color" id="color-picker" value="#0000FF">
+	  <select id="line-style" class="line-style">
+		<option>Solid</option>
+		<option>Dot</option>
+		<option>Dash Dot</option>
+	  </select>
+	  <input type="range" id="line-width" min="1" max="10" value="2" class="line-size">
+	  <div class="divider"></div>
+	  <input type="color" id="fill-color" value="#FFFFFF">
+		<i class="fas fa-fill-drip"></i>
+		<span id="fillColorPreview" class="transparent" style="background-color: #FFFFFF;"></span>
+	  </input>
+		<button id="clear-fill">No Fill</button>
+		<div class="divider"></div>
+		<button><i class="fas fa-undo"></i> Undo</button>
+		<button disabled><i class="fas fa-redo"></i> Redo</button>
+    </div>
     <div class="main-container">
-      <!--<div class="controls">-->
-        <div class="toolbar">
-          <button id="save-btn" class="fas fa-save"></button>
-          <button id="export-btn"><i class="fas fa-download"></i></button>
-          <div class="divider"></div>
-          <button disabled><i class="fas fa-copy"></i></button>
-          <button disabled><i class="fas fa-cut"></i></button>
-          <button><i class="fas fa-paste"></i></button>
-          <div class="divider"></div>
-          <button id="fit-btn"><i class="fas fa-border-all"></i></button>
-          <button id="clear-btn"><i class="fas fa-trash-can-arrow-up"></i></button>
-          <div class="divider"></div>
-          <button id="selection-mode" class="active">
-            <img src="asset/mouse-select.svg" alt="Select" width="16" height="16">
-          </button>
-          <button id="eraser-mode">🧽</button>
-          <button id="pencil-mode">✏️</button>
-          <button id="line-mode">📏</button>
-          <button id="rectangle-mode">🟥</button>
-          <button id="ellipse-mode">⭕</button>
-
-          <div class="divider"></div>
-          <select>
-            <option>Arial</option>
-            <option>Verdana</option>
-            <option>Times New Roman</option>
-          </select>
-          <input type="number" value="20" min="1" max="50">
-          <button id="text-mode">🔤</button> <!-- ✅ Added Text Input Button -->
-          <div class="divider"></div>
-
-          <input type="color" id="color-picker" value="#0000FF">
-          <select id="line-style">
-            <option>Solid</option>
-            <option>Dot</option>
-            <option>Dash Dot</option>
-          </select>
-          <input type="range" id="line-width" min="1" max="10" value="2">
-          <div class="divider"></div>
-          <input type="color" id="fill-color" value="#FFFFFF">
-            <i class="fas fa-fill-drip"></i>
-            <span id="fillColorPreview" class="transparent" style="background-color: #FFFFFF;"></span>
-          </input>
-          <button id="clear-fill">No Fill</button>
-          <div class="divider"></div>
-          <button><i class="fas fa-undo"></i> Undo</button>
-        <button disabled><i class="fas fa-redo"></i> Redo</button>
-      </div>
-      <!--</div>-->
-
-      <div class="canvas-container">
-        <!-- 캔버스 -->
+        <div class="panel" id="libraryPanel">
+            <h5>Library Panel</h5>
+            <p>여기에 심볼 목록을 추가할 수 있습니다.</p>
+        </div>
+        <div class="splitter" id="splitter"></div>
+        <div class="canvas">
+            <!-- 캔버스 -->
         <canvas id="drawing-canvas" width="1600" height="900"></canvas>
         <textarea id="hidden-input" style="position: absolute; opacity: 0; pointer-events: none;"></textarea>
-      </div>
+        </div>
     </div>
-
+    
     <script>
-        const hiddenInput = document.getElementById('hidden-input');
+        const panel = document.getElementById('libraryPanel');
+        const splitter = document.getElementById('splitter');
+        const canvas = document.querySelector('.canvas');
+        let isResizing = false;
 
-        // 포커스 유지 및 입력 전달 (IME 지원)
-        window.addEventListener('click', () => {
-            hiddenInput.focus();
+        splitter.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            document.addEventListener('mousemove', resize);
+            document.addEventListener('mouseup', stopResize);
         });
+
+        function resize(e) {
+            if (isResizing) {
+                let newWidth = e.clientX;
+                let maxWidth = window.innerWidth - 100;
+                if (newWidth > 200 && newWidth < maxWidth) {
+                    panel.style.width = newWidth + 'px';
+                }
+            }
+        }
+
+        function stopResize() {
+            isResizing = false;
+            document.removeEventListener('mousemove', resize);
+            document.removeEventListener('mouseup', stopResize);
+        }
     </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
 </body>
 </html>
