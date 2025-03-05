@@ -157,7 +157,6 @@ impl VecDrawDoc {
         // 줌 및 팬 적용 (기존의 scale과 offset 유지)
         let scale = state.scale();
         let offset = state.offset();
-        info!("scale = {}, offset = {:?}", scale, offset);
         context.transform(Affine::new([scale, 0.0, 0.0, scale, offset.x, offset.y]));
 
         self.shapes.iter().for_each(|shape| {

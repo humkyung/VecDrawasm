@@ -6,7 +6,7 @@ use shapes::shape::Shape;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::console::clear;
-use web_sys::{window, CanvasRenderingContext2d, HtmlElement, HtmlCanvasElement, HtmlInputElement, MouseEvent, WheelEvent, KeyboardEvent, CompositionEvent,
+use web_sys::{window, CanvasRenderingContext2d, HtmlElement, HtmlCanvasElement, HtmlInputElement, Event, MouseEvent, WheelEvent, KeyboardEvent, CompositionEvent,
      InputEvent, Blob, BlobPropertyBag, Url, HtmlAnchorElement};
 use log::info;
 
@@ -28,14 +28,15 @@ mod shapes{
     pub mod line;
     pub mod pencil;
     pub mod rectangle;
+    pub mod polyline;
     pub mod ellipse;
     pub mod elliptical_arc;
     pub mod cubic_bez;
     pub mod text_box;
 }
 use crate::shapes::geometry::{Point2D, Vector2D};
-use crate::shapes::{pencil::Pencil, line::Line, rectangle::Rectangle, ellipse::Ellipse, elliptical_arc::EllipticalArc, cubic_bez::CubicBezier,
-     text_box::TextBox, text_box::TextBoxManager};
+use crate::shapes::{pencil::Pencil, line::Line, rectangle::Rectangle, polyline::Polyline, ellipse::Ellipse, elliptical_arc::EllipticalArc, 
+    cubic_bez::CubicBezier, text_box::TextBox, text_box::TextBoxManager};
 
 pub mod state;
 use crate::state::State;
@@ -269,9 +270,7 @@ pub fn start() -> Result<(), JsValue> {
 
                 let stated = state.borrow().clone();
                 let action_mode = stated.action_mode();
-                info!("action_mode = {:?}", action_mode);
                 let drawing_mode = stated.drawing_mode();
-                info!("drawing mode= {:?}", drawing_mode);
 
                 let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
                 IS_MOUSE_PRESSED.with(|pressed|{
@@ -341,23 +340,28 @@ pub fn start() -> Result<(), JsValue> {
                         let doc = instance.lock().unwrap();
 
                         if action_mode == ActionMode::Drawing{
-                            doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
+                            if mouse_context_points.borrow().len() > 0{
+                                doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
 
-                            let current = Point2D::new(current_x, current_y);
-                            match drawing_mode{
-                                DrawingMode::Line =>{
-                                    draw_xor(drawing_mode, mouse_context_points.borrow().clone(), current);
+                                let current = Point2D::new(current_x, current_y);
+                                match drawing_mode{
+                                    DrawingMode::Line =>{
+                                        draw_xor(drawing_mode, mouse_context_points.borrow().clone(), current);
+                                    }
+                                    DrawingMode::Rectangle =>{
+                                        draw_xor(drawing_mode, mouse_context_points.borrow().clone(), current);
+                                    }
+                                    DrawingMode::Polyline =>{
+                                        draw_xor(drawing_mode, mouse_context_points.borrow().clone(), current);
+                                    }
+                                    DrawingMode::Ellipse =>{
+                                        draw_xor(drawing_mode, mouse_context_points.borrow().clone(), current);
+                                    }
+                                    DrawingMode::CubicBez=>{
+                                        draw_xor(drawing_mode, mouse_context_points.borrow().clone(), current);
+                                    }
+                                    _ =>{}
                                 }
-                                DrawingMode::Rectangle =>{
-                                    draw_xor(drawing_mode, mouse_context_points.borrow().clone(), current);
-                                }
-                                DrawingMode::Ellipse =>{
-                                    draw_xor(drawing_mode, mouse_context_points.borrow().clone(), current);
-                                }
-                                DrawingMode::CubicBez=>{
-                                    draw_xor(drawing_mode, mouse_context_points.borrow().clone(), current);
-                                }
-                                _ =>{}
                             }
                         }
 
@@ -428,6 +432,18 @@ pub fn start() -> Result<(), JsValue> {
                             doc.add_shape(Box::new(pencil));
 
                             mouse_context_points.borrow_mut().clear();
+                        }
+                        DrawingMode::Polyline =>{
+                            if event.button() == 2{
+                                let polyline = Polyline::new(mouse_context_points.borrow().clone(),
+                                state.borrow().color().to_string(), state.borrow().line_width(), state.borrow().background());
+
+                                let instance = VecDrawDoc::instance();
+                                let mut doc = instance.lock().unwrap();
+                                doc.add_shape(Box::new(polyline));
+
+                                mouse_context_points.borrow_mut().clear();
+                            }
                         }
                         DrawingMode::Line =>{
                             let mut mouse_context_points_ref = mouse_context_points.borrow_mut();
@@ -507,6 +523,32 @@ pub fn start() -> Result<(), JsValue> {
                 state.borrow_mut().set_world_coord(Point2D::new(current_x, current_y));
             });
         })?;
+    }
+
+    {
+        let document_clone = document.clone();
+        let closure_contextmenu = Closure::<dyn FnMut(_)>::new(move |event: MouseEvent| {
+            event.prevent_default(); // Prevent the default context menu
+
+            let menu = document_clone.create_element("div").unwrap();
+            menu.set_attribute("id", "custom-context-menu").unwrap();
+            menu.set_attribute("style", "position: absolute; background: white; border: 1px solid black; padding: 5px;").unwrap();
+            menu.set_inner_html("<ul style='list-style: none; margin: 0; padding: 0;'><li style='cursor: pointer;'>Option 1</li><li style='cursor: pointer;'>Option 2</li></ul>");
+            
+            let body = document_clone.body().unwrap();
+            body.append_child(&menu).unwrap();
+            
+            menu.set_attribute("style", &format!("position: absolute; top: {}px; left: {}px; background: white; border: 1px solid black; padding: 5px;", event.client_y(), event.client_x())).unwrap();
+
+            let menu_for_remove = menu.clone();
+            let closure_remove_menu = Closure::<dyn FnMut(_)>::new(move |_: MouseEvent| {
+                menu_for_remove.remove();
+            });
+            body.add_event_listener_with_callback("click", closure_remove_menu.as_ref().unchecked_ref());
+            closure_remove_menu.forget();
+        });
+        canvas.add_event_listener_with_callback("contextmenu", closure_contextmenu.as_ref().unchecked_ref())?;
+        closure_contextmenu.forget();
     }
 
     // ⌨️ Keyboard Input - Capture Text
@@ -757,6 +799,7 @@ pub fn start() -> Result<(), JsValue> {
     Ok(())
 }
 
+// 작성 중인 곡선을 표시한다.
 fn draw_xor(drawing_mode: DrawingMode, points: Vec<Point2D>, end: Point2D){
     if points.len()  == 0 {return;}
 
@@ -802,6 +845,17 @@ fn draw_xor(drawing_mode: DrawingMode, points: Vec<Point2D>, end: Point2D){
                     DrawingMode::Rectangle=>{
                         let rect = piet::kurbo::Rect::new(points.last().unwrap().x,points.last().unwrap().y, end.x, end.y);
                         ctx.stroke_styled(rect, &color, adjusted_width, &stroke_style);
+                    }
+                    DrawingMode::Polyline=>{
+                        let mut path = piet::kurbo::BezPath::new();
+                        path.move_to(Point::new(points.first().unwrap().x, points.first().unwrap().y));
+
+                        for point in points.iter().skip(1) {
+                            path.line_to(Point::new(point.x, point.y));
+                        }
+                        path.line_to(Point::new(end.x, end.y));
+
+                        ctx.stroke_styled(path, &color, adjusted_width, &stroke_style);
                     }
                     DrawingMode::Ellipse=>{
                         let center = (*points.last().unwrap() + end) * 0.5;
@@ -889,6 +943,7 @@ fn setup_mode_buttons() {
     let pencil_button = document.get_element_by_id("pencil-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
     let line_button = document.get_element_by_id("line-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
     let rectangle_button = document.get_element_by_id("rectangle-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+    let polygon_button = document.get_element_by_id("polygon-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
     let ellipse_button = document.get_element_by_id("ellipse-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
     let bezier_button = document.get_element_by_id("bezier-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
     let text_button = document.get_element_by_id("text-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
@@ -900,6 +955,7 @@ fn setup_mode_buttons() {
         let pencil_button = pencil_button.clone();
         let line_button = line_button.clone();
         let rectangle_button = rectangle_button.clone();
+        let polygon_button = polygon_button.clone();
         let text_button = text_button.clone();
 
         selection_button.set_class_name("");
@@ -908,6 +964,7 @@ fn setup_mode_buttons() {
         pencil_button.set_class_name("");
         line_button.set_class_name("");
         rectangle_button.set_class_name("");
+        polygon_button.set_class_name("");
         ellipse_button.set_class_name("");
         bezier_button.set_class_name("");
         text_button.set_class_name("");
@@ -983,6 +1040,19 @@ fn setup_mode_buttons() {
         });
     }
     
+    // Polygon mode Handler
+    {
+        let polygon_button = document.get_element_by_id("polygon-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
+        let polygon_button_clone = polygon_button.clone();
+        let update_ui_clone = update_ui.clone();
+        add_click_listener(&polygon_button, move || {
+            STATE.with(|state| {
+                state.borrow_mut().set_action_mode(&ActionMode::Drawing);
+                state.borrow_mut().set_drawing_mode(&DrawingMode::Polyline);
+            });
+            update_ui_clone(&polygon_button_clone);
+        });
+    }
     // Ellipse mode Handler
     {
         let ellipse_button = document.get_element_by_id("ellipse-mode").unwrap().dyn_into::<HtmlElement>().unwrap();
