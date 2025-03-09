@@ -1,36 +1,49 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::f64::MAX;
+use std::f64::consts::PI;
 use std::iter::Scan;
 use std::str;
 use std::task::Context;
 use std::thread::panicking;
 use log::info;
+use piet::LinearGradient;
 use piet_web::WebRenderContext;
+use js_sys::Promise;
 use wasm_bindgen::convert::FromWasmAbi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
+use std::sync::{Arc, Mutex};
 
 use piet::{RenderContext, Color, Text, TextLayout, StrokeStyle};
 use kurbo::Affine;
 
 use web_sys::console::group;
 use web_sys::console::info;
-use web_sys::{window, CanvasRenderingContext2d, Element, DomParser, CanvasGradient, HtmlCanvasElement, Path2d, CssStyleDeclaration};
+use web_sys::{window, CanvasRenderingContext2d, Element, DomParser, CanvasGradient, HtmlCanvasElement, Path2d, CssStyleDeclaration, File, FileReader, Blob};
 use svgtypes::Transform;
 
 use crate::state::State;
-use super::geometry::{Point2D, Vector2D};
-use super::shape::{Shape, hex_to_color};
+use super::geometry::{Point2D, Vector2D, BoundingRect2D};
+use super::shape::{DrawShape, hex_to_color};
+use crate::shapes::{pencil::Pencil, line::Line, rectangle::Rectangle, polyline::Polyline, ellipse::Ellipse, elliptical_arc::EllipticalArc, 
+    cubic_bez::CubicBezier, text_box::TextBox, text_box::TextBoxManager};
+
+use crate::vec_draw_doc::VecDrawDoc;
 
 #[derive(Debug, Clone)]
-pub struct Svg{
+pub struct Svg {
     selected: bool,
     location: Point2D,
+    width: f64,
+    height: f64,
     content: String,
     selected_control_point: i32,
 
     styles: Option<HashMap<String, HashMap<String, String>>>,
+
+    shapes: Vec<Arc<Mutex<dyn DrawShape>>>,    // ✅ Shape 리스트
 }
 
 impl Svg{
@@ -38,15 +51,19 @@ impl Svg{
         Svg{
             selected: false, 
             location, 
+            width: f64::MAX,
+            height: f64::MAX,
             selected_control_point: -1,
             content: svg_text.to_string(), 
-            styles: None}
+            styles: None,
+            shapes: Vec::new()}
     }
 
     // 🎯 SVG에서 Gradient를 추출하는 함수
-    fn extract_gradients(&self, context: &CanvasRenderingContext2d, svg_element: &Element) -> HashMap<String, CanvasGradient> {
+    fn extract_gradients(&self, context: &WebRenderContext, svg_element: &Element) -> HashMap<String, CanvasGradient> {
         let mut gradients: HashMap<String, CanvasGradient> = std::collections::HashMap::new();
 
+        /*
         let linear_gradients = svg_element.query_selector_all("linearGradient").unwrap();
         for i in 0..linear_gradients.length() {
             if let Some(gradient_element) = linear_gradients.item(i) {
@@ -137,6 +154,7 @@ impl Svg{
                 }
             }
         }
+        */
 
         gradients
     }
@@ -232,9 +250,9 @@ impl Svg{
     }
 
     // 🎯 SVG를 Canvas에 순서대로 그리는 함수 (g 요소 포함)
-    pub fn render_svg_to_canvas(&self, context: &CanvasRenderingContext2d, parent_element: &Element , gradients: &HashMap<String, CanvasGradient>){
-        context.save();
-        context.translate(self.location.x, self.location.y).unwrap();
+    pub fn render_svg_to_canvas(&mut self, context: &mut WebRenderContext, parent_element: &Element , gradients: &HashMap<String, CanvasGradient>){
+        //context.save();
+        //context.transform(Affine::new([1.0, 0.0, 0.0, 1.0, self.location.x, self.location.y]));
 
         let child_nodes = parent_element.child_nodes();
         for i in 0..child_nodes.length() {
@@ -244,21 +262,25 @@ impl Svg{
                     let fill_style = self.parse_fill_attribute(element, gradients);
 
                     match tag_name.as_str() {
-                        "g" => self.render_group(&context, element, gradients, &fill_style),
-                        "rect" => self.render_rect(&context, element, gradients, &fill_style),
-                        "polygon" => self.render_polygon(&context, element, gradients),
-                        "polyline" => self.render_polyline(&context, element, gradients),
-                        "ellipse" => self.render_ellipse(&context, element, gradients),
-                        "circle" => self.render_circle(&context, element, gradients),
-                        "path" => self.render_path(&context, element, gradients, &fill_style),
-                        "text" => self.render_text(&context, element, gradients),
+                        //"g" => self.render_group(&context, element, gradients, &fill_style),
+                        "rect" => {
+                            if let Some(rectangle) = self.render_rect(&context, element, gradients, &fill_style){
+                                self.shapes.push(Arc::new(Mutex::new(rectangle)));
+                            }
+                        },
+                        //"polygon" => self.render_polygon(&context, element, gradients),
+                        //"polyline" => self.render_polyline(&context, element, gradients),
+                        //"ellipse" => self.render_ellipse(&context, element, gradients),
+                        //"circle" => self.render_circle(&context, element, gradients),
+                        //"path" => self.render_path(&context, element, gradients, &fill_style),
+                        //"text" => self.render_text(&context, element, gradients),
                         _ => (),
                     }
                 }
             }
         }
 
-        context.restore();
+        //context.restore();
     }
 
     // 🎯 `g` 요소의 `transform` 속성을 적용하는 함수
@@ -331,13 +353,13 @@ impl Svg{
     }
 
     // 🎯 Group 요소 처리
-    fn render_group(&self, context: &CanvasRenderingContext2d, group_element: &Element, gradients: &HashMap<String, CanvasGradient>, fill_style: &JsValue){
-        context.save();
+    fn render_group(&mut self, context: &WebRenderContext, group_element: &Element, gradients: &HashMap<String, CanvasGradient>, fill_style: &JsValue){
+        //context.save();
 
         let transform = group_element.get_attribute("transform").unwrap_or_default();
-        self.apply_transform(context, &transform);
-        self.apply_class_attribute(&context, group_element);
-        self.apply_fill_attribute(&context, group_element, gradients);
+        //self.apply_transform(context, &transform);
+        //self.apply_class_attribute(&context, group_element);
+        //self.apply_fill_attribute(&context, group_element, gradients);
 
         // 🎨 그룹의 `fill` 속성 가져오기
         let mut group_fill = self.parse_fill_attribute(group_element, gradients);
@@ -351,21 +373,25 @@ impl Svg{
                 if let Some(element) = node.dyn_ref::<Element>() {
                     let tag_name = element.tag_name().to_lowercase();
                     match tag_name.as_str() {
-                        "g" => self.render_group(&context, element, gradients, &group_fill),
-                        "rect" => self.render_rect(&context, element, gradients, &group_fill),
-                        "polygon" => self.render_polygon(&context, element, gradients),
-                        "polyline" => self.render_polyline(&context, element, gradients),
-                        "ellipse" => self.render_ellipse(&context, element, gradients),
-                        "circle" => self.render_circle(&context, element, gradients),
-                        "path" => self.render_path(&context, element, gradients, &group_fill),
-                        "text" => self.render_text(&context, element, gradients),
+                        //"g" => self.render_group(&context, element, gradients, &group_fill),
+                        "rect" => {
+                            if let Some(rectangle) = self.render_rect(&context, element, gradients, &group_fill){
+                                self.shapes.push(Arc::new(Mutex::new(rectangle)));
+                            }
+                        },
+                        //"polygon" => self.render_polygon(&context, element, gradients),
+                        //"polyline" => self.render_polyline(&context, element, gradients),
+                        //"ellipse" => self.render_ellipse(&context, element, gradients),
+                        //"circle" => self.render_circle(&context, element, gradients),
+                        //"path" => self.render_path(&context, element, gradients, &group_fill),
+                        //"text" => self.render_text(&context, element, gradients),
                         _ => (),
                     }
                 }
             }
         }
 
-        context.restore();
+        //context.restore();
     }
 
     // 🎯 Polygon 요소 처리
@@ -516,7 +542,7 @@ impl Svg{
         context.restore();
     }
 
-    fn render_rect(&self, context: &CanvasRenderingContext2d, rect_element: &Element, gradients: &HashMap<String, CanvasGradient>, group_fill: &JsValue){
+    fn render_rect(&self, context: &WebRenderContext, rect_element: &Element, gradients: &HashMap<String, CanvasGradient>, group_fill: &JsValue) -> Option<Rectangle>{
         let x_pos = rect_element.get_attribute("x").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
         let y_pos = rect_element.get_attribute("y").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
         let width = rect_element.get_attribute("width").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
@@ -524,6 +550,9 @@ impl Svg{
         let rx = rect_element.get_attribute("rx").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
         let ry = rect_element.get_attribute("ry").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
 
+        Some(Rectangle::new(Point2D::new(x_pos, y_pos), width, height, "#000000".to_string(), 1.0, Some("".to_string())))
+
+        /*
         let mut fill_style= group_fill.clone();
         fill_style = self.parse_fill_attribute(rect_element, gradients);
         if fill_style.as_string().unwrap_or_default() == "none" {
@@ -572,6 +601,7 @@ impl Svg{
         }
 
         context.restore();
+        */
     }
 
     // 🎯 `path` 요소를 Canvas에 그리는 함수
@@ -709,7 +739,7 @@ impl Svg{
     }
 }
 
-impl Shape for Svg{
+impl DrawShape for Svg{
     fn color(&self) -> &str {
         "#0000ff"
     }
@@ -718,8 +748,18 @@ impl Shape for Svg{
         2.0
     }
 
+    fn bounding_rect(&self) -> super::geometry::BoundingRect2D {
+        BoundingRect2D { min: self.min_point(), max: self.max_point() }
+    }
+
     fn is_hit(&self, x: f64, y: f64, scale: f64) -> bool {
         false        
+    }
+
+    /// Given a shape and a point, returns the closest position on the shape's
+    /// perimeter, or `None` if the shape is malformed.
+    fn closest_perimeter_point(&self, pt: Point2D) -> Option<Point2D> {
+        None
     }
 
     fn max_point(&self) -> Point2D{
@@ -764,6 +804,10 @@ impl Shape for Svg{
     }
 
     fn draw(&self, context: &mut WebRenderContext, scale: f64){
+        self.shapes.iter().for_each(|shape| {
+            shape.lock().unwrap().draw(context, scale);
+        });
+
         /*
         let parser = DomParser::new().unwrap();
         let doc = parser.parse_from_string(&self.content, web_sys::SupportedType::ImageSvgXml).unwrap();
@@ -784,6 +828,11 @@ impl Shape for Svg{
     fn draw_control_points(&self, context: &mut WebRenderContext, scale: f64) {
     }
 
+    // svg 텍스트를 반환한다.
+    fn to_svg(&self, rect: BoundingRect2D) -> String{
+        "".to_string()
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -791,4 +840,199 @@ impl Shape for Svg{
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+}
+
+pub async fn parse_svg_file<'a>(context: &mut WebRenderContext<'a>, canvas: &Element, file: File, drop_x: f64, drop_y: f64) -> 
+Result<Vec<Box<dyn DrawShape>>, JsValue> {
+    let reader = FileReader::new().unwrap();
+
+    // 파일을 Blob으로 변환
+    let blob: Blob = file.slice().map_err(|e| {
+        web_sys::console::error_1(&format!("Error slicing file: {:?}", e).into());
+        e
+    })?;
+
+    // FileReader로 텍스트 읽기
+    reader.read_as_text(&blob).map_err(|e| {
+        web_sys::console::error_1(&format!("Error reading file: {:?}", e).into());
+        e
+    })?;
+
+    // Promise를 생성하여 `onload`가 완료될 때까지 기다림
+    let promise = Promise::new(&mut |resolve, _| {
+        let onload_closure = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+            resolve.call0(&JsValue::null()).unwrap();
+        }) as Box<dyn FnMut(_)>);
+
+        reader.set_onload(Some(onload_closure.as_ref().unchecked_ref()));
+        onload_closure.forget(); // Rust에서 GC로부터 해제 방지
+    });
+
+    // `onload`가 완료될 때까지 대기
+    JsFuture::from(promise).await?;
+
+    // 읽은 파일 내용을 가져오기
+    let svg_data= reader.result().unwrap().as_string().unwrap();
+    web_sys::console::log_1(&format!("File content: {}", svg_data).into());
+
+    let mut shapes = Vec::new();
+
+    let parser = DomParser::new().unwrap();
+    let doc = parser.parse_from_string(&svg_data, web_sys::SupportedType::ImageSvgXml).unwrap();
+
+    if let Some(svg_element) = doc.query_selector("svg").ok().flatten() {
+        //let gradients = self.extract_gradients(context, &svg_element);
+        //self.extract_styles(&svg_element);
+        match parse_svg_element(&svg_element) {
+            Ok(elements) => shapes.extend(elements),
+            Err(e) => web_sys::console::error_1(&format!("Error parsing SVG element: {:?}", e).into()),
+        }
+    } else {
+        web_sys::console::log_1(&"⚠️ SVG 파싱 실패".into());
+    }
+
+    //render_svg_to_canvas(context, &canvas, &svg_data, drop_x, drop_y);
+
+    Ok(shapes)
+}
+
+// 🎯 SVG를 Canvas에 순서대로 그리는 함수 (g 요소 포함)
+fn parse_svg_element(parent_element: &Element) -> Result<Vec<Box<dyn DrawShape>>, JsValue>{
+    let mut shapes: Vec<Box<dyn DrawShape>> = Vec::new();
+
+    let child_nodes = parent_element.child_nodes();
+    for i in 0..child_nodes.length() {
+        if let Some(node) = child_nodes.item(i) {
+            if let Some(element) = node.dyn_ref::<Element>() {
+                let tag_name = element.tag_name().to_lowercase();
+                //let fill_style = self.parse_fill_attribute(element, gradients);
+
+                match tag_name.as_str() {
+                    //"g" => self.render_group(&context, element, gradients, &fill_style),
+                    "line" =>{
+                        if let Some(line) = parse_line(element){
+                            shapes.push(line);
+                        }
+                    }
+                    "rect" => {
+                        if let Some(rectangle) = parse_rect(element){
+                            shapes.push(rectangle);
+                        }
+                    },
+                    //"polygon" => self.render_polygon(&context, element, gradients),
+                    //"polyline" => self.render_polyline(&context, element, gradients),
+                    "ellipse" => {
+                        if let Some(ellipse) = parse_ellipse(element){
+                            shapes.push(ellipse);
+                        }
+                    },
+                    //"circle" => self.render_circle(&context, element, gradients),
+                    //"path" => self.render_path(&context, element, gradients, &fill_style),
+                    //"text" => self.render_text(&context, element, gradients),
+                    _ => (),
+                }
+            }
+        }
+    }
+
+    Ok(shapes)
+}
+
+fn parse_svg_style(style: &str) -> HashMap<String, String> {
+    let mut styles_map = HashMap::new();
+
+    for rule in style.split(';') {
+        let parts: Vec<&str> = rule.split(':').map(|s| s.trim()).collect();
+        if parts.len() == 2 {
+            styles_map.insert(parts[0].to_string(), parts[1].to_string());
+        }
+    }
+
+    styles_map
+}
+
+/// parse line element
+fn parse_line(rect_element: &Element) -> Option<Box<dyn DrawShape>>{
+    let x1 = rect_element.get_attribute("x1").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+    let y1 = rect_element.get_attribute("y1").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+    let x2 = rect_element.get_attribute("x2").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+    let y2 = rect_element.get_attribute("y2").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+
+    let mut color = "#000000".to_string();
+    let mut fill = "none".to_string();
+    if let Some(style) = rect_element.get_attribute("style"){
+        let style_map = parse_svg_style(&style);
+
+        if let Some(stroke_value) = style_map.get("stroke") {
+            color = stroke_value.clone();
+        }
+
+        if let Some(fill_value) = style_map.get("fill") {
+            fill = fill_value.clone();
+        }
+    }
+
+    let line = Line::new(Point2D::new(x1, y1), Point2D::new(x2, y2), color.to_string(), 1.0);
+    Some(Box::new(line))
+}
+
+/// parse rectangle element
+fn parse_rect(rect_element: &Element) -> Option<Box<dyn DrawShape>>{
+    let x_pos = rect_element.get_attribute("x").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+    let y_pos = rect_element.get_attribute("y").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+    let width = rect_element.get_attribute("width").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+    let height = rect_element.get_attribute("height").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+    let rx = rect_element.get_attribute("rx").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+    let ry = rect_element.get_attribute("ry").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+
+    let mut color = "#000000".to_string();
+    let mut fill = "none".to_string();
+    if let Some(style) = rect_element.get_attribute("style"){
+        let style_map = parse_svg_style(&style);
+        if let Some(fill_value) = style_map.get("fill") {
+            fill = fill_value.clone();
+        }
+
+        if let Some(stroke_value) = style_map.get("stroke") {
+            color = stroke_value.clone();
+        }
+    }
+
+    let rectangle = Rectangle::new(Point2D::new(x_pos, y_pos), width, height, color.to_string(), 1.0, Some(fill.to_string()));
+    Some(Box::new(rectangle))
+}
+
+// 🎯 Ellipse 요소 처리
+fn parse_ellipse(ellipse_element: &Element) -> Option<Box<dyn DrawShape>>{
+    let cx = ellipse_element.get_attribute("cx").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+    let cy = ellipse_element.get_attribute("cy").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+    let rx = ellipse_element.get_attribute("rx").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+    let ry = ellipse_element.get_attribute("ry").unwrap_or("0".to_string()).parse::<f64>().unwrap_or(0.0);
+
+    let mut color = "#000000".to_string();
+    let mut fill = "none".to_string();
+    if let Some(style) = ellipse_element.get_attribute("style"){
+        let style_map = parse_svg_style(&style);
+        if let Some(fill_value) = style_map.get("fill") {
+            fill = fill_value.clone();
+        }
+
+        if let Some(stroke_value) = style_map.get("stroke") {
+            color = stroke_value.clone();
+        }
+    }else if let Some(stroke) = ellipse_element.get_attribute("stroke"){
+        color = stroke.clone();
+    }
+
+    let ellipse = Ellipse::new(Point2D::new(cx, cy), rx, ry, 0.0, 0.0, 2.0 * PI, color, 1.0, Some(fill));
+    Some(Box::new(ellipse))
+}
+
+// 🎯 Canvas에 SVG를 벡터로 렌더링
+pub fn render_svg_to_canvas(context: &mut WebRenderContext, _canvas: &Element, svg_data: &str, x: f64, y: f64) {
+    let svg = Svg::new(Point2D::new(x, y), svg_data); 
+    svg.draw(context, 1.0);
+
+    let instance = VecDrawDoc::instance();
+    instance.lock().unwrap().add_shape(Box::new(svg));
 }

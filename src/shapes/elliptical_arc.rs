@@ -17,11 +17,11 @@ use web_sys::console::info;
 use web_sys::{window, CanvasRenderingContext2d};
 
 use piet::{RenderContext, Color, StrokeStyle};
-use kurbo::{Affine, Point, Vec2};
+use kurbo::{Affine, Shape, Point, Vec2, ParamCurve, ParamCurveNearest};
 
-use crate::state::State;
+use crate::state::{State, ActionMode};
 use super::geometry::{Point2D, Vector2D, BoundingRect2D};
-use super::shape::{Shape, hex_to_color};
+use super::shape::{DrawShape, hex_to_color, DESIRED_ACCURACY};
 
 #[derive(Debug, Clone)]
 pub struct EllipticalArc{
@@ -30,7 +30,7 @@ pub struct EllipticalArc{
     radius_y: f64,
     rotation: f64,
     start_angle: f64,
-    end_angle: f64,
+    sweep_angle: f64,
     selected: bool,
     hovered: bool,
     color: String,
@@ -40,14 +40,14 @@ pub struct EllipticalArc{
     selected_control_point: i32
 }
 impl EllipticalArc{
-    pub fn new(center: Point2D, rx: f64, ry: f64, rotation: f64, start_angle: f64, end_angle: f64, color: String, line_width: f64) -> Self {
+    pub fn new(center: Point2D, rx: f64, ry: f64, rotation: f64, start_angle: f64, sweep_angle: f64, color: String, line_width: f64) -> Self {
         EllipticalArc{
             center, 
             radius_x: rx, 
             radius_y: ry, 
             rotation: rotation, 
             start_angle: start_angle, 
-            end_angle: end_angle, 
+            sweep_angle,
             selected: false, 
             hovered: false, 
             color, 
@@ -85,7 +85,7 @@ impl EllipticalArc{
         axis_y
     }
 }
-impl Shape for EllipticalArc{
+impl DrawShape for EllipticalArc{
     fn color(&self) -> &str {
         &self.color
     }
@@ -117,6 +117,27 @@ impl Shape for EllipticalArc{
         if y < min_pt.y || y > max_pt.y {return false;}
 
         true
+    }
+
+    /// Given a shape and a point, returns the closest position on the shape's
+    /// perimeter, or `None` if the shape is malformed.
+    fn closest_perimeter_point(&self, pt: Point2D) -> Option<Point2D> {
+        let mut best: Option<(kurbo::Point, f64)> = None;
+
+        let arc= piet::kurbo::Arc::new(
+            Point::new(self.center.x, self.center.y), 
+            Vec2::new(self.radius_x, self.radius_y),
+            self.start_angle, self.sweep_angle,
+           self.rotation 
+        );
+
+        for segment in arc.path_segments(DESIRED_ACCURACY) {
+            let nearest = segment.nearest(kurbo::Point::new(pt.x, pt.y), DESIRED_ACCURACY);
+            if best.map(|(_, best_d)| nearest.distance_sq < best_d).unwrap_or(true) {
+                best = Some((segment.eval(nearest.t), nearest.distance_sq))
+            }
+        }
+        best.map(|(point, _)| Point2D::new(point.x, point.y))
     }
 
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
@@ -235,8 +256,8 @@ impl Shape for EllipticalArc{
         let arc= piet::kurbo::Arc::new(
             Point::new(self.center.x, self.center.y), 
             Vec2::new(self.radius_x, self.radius_y),
-            self.start_angle, self.end_angle - self.start_angle,
-            0.0
+            self.start_angle, self.sweep_angle,
+           self.rotation 
         );
     
         context.stroke(&arc, &color, adjusted_width);

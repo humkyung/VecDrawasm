@@ -28,7 +28,7 @@ use piet::{RenderContext, Color, Text, TextLayout, TextLayoutBuilder, ImageForma
 use crate::shapes::geometry::BoundingRect2D;
 use crate::shapes::geometry::{Point2D, Vector2D};
 use std::cmp::PartialEq;
-use crate::shapes::shape::{Shape, convert_to_color};
+use crate::shapes::shape::{DrawShape, convert_to_color};
 use crate::shapes::{pencil::Pencil, line::Line, rectangle::Rectangle, ellipse::Ellipse, text_box::TextBox, text_box::TextBoxManager};
 
 use crate::state::State;
@@ -39,8 +39,8 @@ const GRID_SIZE: f64 = 50.0; // 그리드 간격
 pub struct VecDrawDoc {
     document: Document,
     canvas: HtmlCanvasElement,
-    pub shapes: Vec<Arc<Mutex<Box<dyn Shape>>>>,    // ✅ 공유 가능한 Shape 리스트
-    pub ghost: Option<Arc<Mutex<Box<dyn Shape>>>>,  // ✅ 공유 가능한 임시 Shape
+    pub shapes: Vec<Arc<Mutex<Box<dyn DrawShape>>>>,    // ✅ 공유 가능한 Shape 리스트
+    pub ghost: Option<Arc<Mutex<Box<dyn DrawShape>>>>,  // ✅ 공유 가능한 임시 Shape
 }
 unsafe impl Send for VecDrawDoc {}
 unsafe impl Sync for VecDrawDoc {}
@@ -68,7 +68,7 @@ impl VecDrawDoc {
         Arc::clone(&INSTANCE) // ✅ 공유된 인스턴스 반환
     }
 
-    pub fn add_shape(&mut self, shape: Box<dyn Shape>) {
+    pub fn add_shape(&mut self, shape: Box<dyn DrawShape>) {
         self.shapes.push(Arc::new(Mutex::new(shape)));
     }
 
@@ -88,7 +88,7 @@ impl VecDrawDoc {
         self.shapes.len()
     }
 
-    pub fn nth(&self, index: usize) -> Option<Arc<Mutex<Box<dyn Shape>>>> {
+    pub fn nth(&self, index: usize) -> Option<Arc<Mutex<Box<dyn DrawShape>>>> {
         self.shapes.get(index).cloned()
     }
 
@@ -110,7 +110,7 @@ impl VecDrawDoc {
     /*
         마우스 커서 아래에 있는 Shape의 인덱스를 리턴한다.
     */
-    pub fn get_shapes_under_mouse(&self, x: f64, y: f64, scale: f64) -> Vec<Arc<Mutex<Box<dyn Shape>>>>{
+    pub fn get_shapes_under_mouse(&self, x: f64, y: f64, scale: f64) -> Vec<Arc<Mutex<Box<dyn DrawShape>>>>{
         self.shapes
             .iter()
             .filter_map(|shape| {
@@ -126,7 +126,7 @@ impl VecDrawDoc {
     /*
         선택된 객체의 인덱스를 리턴한다.
     */
-    pub fn get_selected_shapes(&self) -> Vec<Arc<Mutex<Box<dyn Shape>>>>{
+    pub fn get_selected_shapes(&self) -> Vec<Arc<Mutex<Box<dyn DrawShape>>>>{
         self.shapes
             .iter()
             .filter_map(|shape| {

@@ -17,14 +17,14 @@ use web_sys::console::info;
 use web_sys::{window, CanvasRenderingContext2d};
 
 use piet::{RenderContext, Color, StrokeStyle};
-use kurbo::{Affine, Point};
+use kurbo::{Affine, Shape, Point, ParamCurve, ParamCurveNearest};
 
-use crate::state::State;
+use crate::state::{State, ActionMode};
 use super::geometry::BoundingRect2D;
 use super::geometry::Vector2D;
 use super::geometry::{Point2D};
 use super::shape::convert_to_color;
-use super::shape::{Shape, hex_to_color};
+use super::shape::{DrawShape, hex_to_color, DESIRED_ACCURACY};
 
 #[derive(Debug, Clone)]
 pub struct Ellipse{
@@ -90,7 +90,7 @@ impl Ellipse{
         axis_y
     }
 }
-impl Shape for Ellipse{
+impl DrawShape for Ellipse{
     fn color(&self) -> &str {
         &self.color
     }
@@ -122,6 +122,24 @@ impl Shape for Ellipse{
         if y < min_pt.y || y > max_pt.y {return false;}
 
         true
+    }
+
+    /// Given a shape and a point, returns the closest position on the shape's
+    /// perimeter, or `None` if the shape is malformed.
+    fn closest_perimeter_point(&self, pt: Point2D) -> Option<Point2D> {
+        let mut best: Option<(kurbo::Point, f64)> = None;
+
+        let center = piet::kurbo::Point::new(self.center.x, self.center.y);
+        let radii = piet::kurbo::Vec2::new(self.radius_x, self.radius_y);
+        let ellipse = piet::kurbo::Ellipse::new(center, radii, self.rotation);
+
+        for segment in ellipse.path_segments(DESIRED_ACCURACY) {
+            let nearest = segment.nearest(kurbo::Point::new(pt.x, pt.y), DESIRED_ACCURACY);
+            if best.map(|(_, best_d)| nearest.distance_sq < best_d).unwrap_or(true) {
+                best = Some((segment.eval(nearest.t), nearest.distance_sq))
+            }
+        }
+        best.map(|(point, _)| Point2D::new(point.x, point.y))
     }
 
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
@@ -240,7 +258,9 @@ impl Shape for Ellipse{
         let radii = piet::kurbo::Vec2::new(self.radius_x, self.radius_y);
         let ellipse = piet::kurbo::Ellipse::new(center, radii, self.rotation);
         if let Some(ref background_color) = self.background {
-            context.fill(ellipse, &convert_to_color(background_color));
+            if background_color != "none"{
+                context.fill(ellipse, &convert_to_color(background_color));
+            }
         }
         context.stroke(ellipse, &color, adjusted_width);
         
@@ -256,6 +276,30 @@ impl Shape for Ellipse{
         context.transform(Affine::new([scale, 0.0, 0.0, scale, offset.x, offset.y]));
 
         self.draw(context, scale);
+        if state.action_mode() == ActionMode::Drawing{
+            if let Some(closest) = self.closest_perimeter_point(state.world_coord()){
+                if state.world_coord().distance_to(closest) < 10.0{
+                    // Define stroke style
+                    let mut stroke_style = StrokeStyle::new();
+                    stroke_style.set_line_cap(piet::LineCap::Round);
+                    stroke_style.set_line_join(piet::LineJoin::Bevel);
+
+                    let adjusted_width = 1.0 / scale;
+
+                    // draw mark
+                    let line = piet::kurbo::Line::new(
+                        Point::new(closest.x - 5.0 / scale, closest.y - 5.0 / scale), 
+                        Point::new(closest.x + 5.0 / scale, closest.y + 5.0 / scale));
+                    context.stroke_styled(line, &Color::BLUE, adjusted_width, &stroke_style);
+
+                    let line = piet::kurbo::Line::new(
+                        Point::new(closest.x - 5.0 / scale, closest.y + 5.0 / scale), 
+                        Point::new(closest.x + 5.0 / scale, closest.y - 5.0 / scale));
+                    context.stroke_styled(line, &Color::BLUE, adjusted_width, &stroke_style);
+                    //
+                }
+            }
+        }
 
         let _ = context.restore();
     }

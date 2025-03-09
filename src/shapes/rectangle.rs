@@ -14,11 +14,11 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use piet::{RenderContext, Color, StrokeStyle};
-use kurbo::Affine;
+use kurbo::{Affine, Shape, Point, ParamCurve, ParamCurveNearest};
 
-use crate::state::State;
+use crate::state::{State, ActionMode};
 use super::geometry::{Point2D, Vector2D, BoundingRect2D};
-use super::shape::{Shape, convert_to_color};
+use super::shape::{DrawShape, convert_to_color, DESIRED_ACCURACY};
 
 #[derive(Debug, Clone)]
 pub struct Rectangle{
@@ -85,7 +85,7 @@ impl Rectangle{
     }
 }
 
-impl Shape for Rectangle{
+impl DrawShape for Rectangle{
     fn color(&self) -> &str {
         &self.color
     }
@@ -118,6 +118,49 @@ impl Shape for Rectangle{
         if y > max_pt.y {return false;}
 
         true
+    }
+
+    /// Given a shape and a point, returns the closest position on the shape's
+    /// perimeter, or `None` if the shape is malformed.
+    fn closest_perimeter_point(&self, pt: Point2D) -> Option<Point2D> {
+        let mut best: Option<(kurbo::Point, f64)> = None;
+
+        let rect = piet::kurbo::Rect::new(self.center.x - self.width * 0.5, self.center.y - self.height * 0.5,
+            self.center.x + self.width * 0.5 , self.center.y + self.height * 0.5);
+
+        let center = rect.center();
+        let affine = Affine::translate((center.x, center.y))  // Move center to (0,0)
+            * Affine::rotate(self.rotation)                         // Rotate
+            * Affine::translate((-center.x, -center.y));                  // Move back
+
+        let points = [
+            rect.origin(),                       // Top-left
+            Point::new(rect.x1, rect.y0),   // Top-right
+            Point::new(rect.x1, rect.y1),   // Bottom-right
+            Point::new(rect.x0, rect.y1),   // Bottom-left
+        ];
+
+        let transformed = points.map(|p| affine * p); // Apply the transformation
+
+        let mut path = piet::kurbo::BezPath::new();
+        if let Some(start) = transformed.first() {
+            path.move_to(Point::new(start.x, start.y));
+
+            for point in transformed.iter().skip(1) {
+                path.line_to(Point::new(point.x, point.y));
+            }
+            path.close_path();
+
+            for segment in path.path_segments(DESIRED_ACCURACY) {
+                let nearest = segment.nearest(kurbo::Point::new(pt.x, pt.y), DESIRED_ACCURACY);
+                if best.map(|(_, best_d)| nearest.distance_sq < best_d).unwrap_or(true) {
+                    best = Some((segment.eval(nearest.t), nearest.distance_sq))
+                }
+            }
+            return best.map(|(point, _)| Point2D::new(point.x, point.y));
+        }
+
+        None
     }
 
     /// Get the index of the control point that is hit by the mouse cursor.
@@ -246,7 +289,9 @@ impl Shape for Rectangle{
         let rect = piet::kurbo::Rect::new(self.center.x - self.width * 0.5, self.center.y - self.height * 0.5,
             self.center.x + self.width * 0.5 , self.center.y + self.height * 0.5);
         if let Some(ref background_color) = self.background {
-            context.fill(rect, &convert_to_color(background_color));
+            if background_color != "none"{
+                context.fill(rect, &convert_to_color(background_color));
+            }
         }
         context.stroke(rect, &color, adjusted_width);
         
@@ -261,10 +306,33 @@ impl Shape for Rectangle{
         // 줌 및 팬 적용 (기존의 scale과 offset 유지)
         let scale = state.scale();
         let offset = state.offset();
-        info!("scale = {}, offset = {:?}", scale, offset);
         context.transform(Affine::new([scale, 0.0, 0.0, scale, offset.x, offset.y]));
 
+        let adjusted_width = 1.0 / scale;
+
         self.draw(context, scale);
+        if state.action_mode() == ActionMode::Drawing{
+            if let Some(closest) = self.closest_perimeter_point(state.world_coord()){
+                if state.world_coord().distance_to(closest) < 10.0{
+                    // Define stroke style
+                    let mut stroke_style = StrokeStyle::new();
+                    stroke_style.set_line_cap(piet::LineCap::Round);
+                    stroke_style.set_line_join(piet::LineJoin::Bevel);
+
+                    // draw mark
+                    let line = piet::kurbo::Line::new(
+                        Point::new(closest.x - 5.0 / scale, closest.y - 5.0 / scale), 
+                        Point::new(closest.x + 5.0 / scale, closest.y + 5.0 / scale));
+                    context.stroke_styled(line, &Color::BLUE, adjusted_width, &stroke_style);
+
+                    let line = piet::kurbo::Line::new(
+                        Point::new(closest.x - 5.0 / scale, closest.y + 5.0 / scale), 
+                        Point::new(closest.x + 5.0 / scale, closest.y - 5.0 / scale));
+                    context.stroke_styled(line, &Color::BLUE, adjusted_width, &stroke_style);
+                    //
+                }
+            }
+        }
 
         let _ = context.restore();
     }

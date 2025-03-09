@@ -14,7 +14,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use piet::{RenderContext, Color, Text, TextLayout, TextLayoutBuilder, FontFamily, StrokeStyle};
-use kurbo::Affine;
+use kurbo::{Affine, Shape, ParamCurve, ParamCurveNearest};
 use piet_web::WebRenderContext;
 
 use web_sys::console::group;
@@ -27,12 +27,12 @@ use std::thread;
 
 use crate::state::State;
 use super::geometry::{Point2D, Vector2D, BoundingRect2D};
-use super::shape::{Shape, convert_to_color};
+use super::shape::{DrawShape, convert_to_color, DESIRED_ACCURACY};
 
 pub struct TextBoxManager {
     document: Document,
     context: Rc<RefCell<WebRenderContext<'static>>>,
-    attached: Option<Arc<Mutex<Box<dyn Shape>>>>,
+    attached: Option<Arc<Mutex<Box<dyn DrawShape>>>>,
     cursor_visible: bool,
     is_composing: bool,
     composition_text: String,
@@ -75,7 +75,7 @@ impl TextBoxManager {
     }
 
     /// 텍스트 박스를 연결한다.
-    pub fn attach(&mut self, attached: Arc<Mutex<Box<dyn Shape>>>, state: &State) {
+    pub fn attach(&mut self, attached: Arc<Mutex<Box<dyn DrawShape>>>, state: &State) {
         self.attached = Some(attached);
 
         self.focus_hidden_input();
@@ -639,7 +639,7 @@ impl TextBox{
         self.width = text_width.clamp(50.0, f64::MAX) + 10.0; // padding 포함
     }
 }
-impl Shape for TextBox{
+impl DrawShape for TextBox{
     fn color(&self) -> &str {
         &self.color
     }
@@ -671,6 +671,22 @@ impl Shape for TextBox{
         if y < min_pt.y || y > max_pt.y {return false;}
 
         true
+    }
+
+    /// Given a shape and a point, returns the closest position on the shape's
+    /// perimeter, or `None` if the shape is malformed.
+    fn closest_perimeter_point(&self, pt: Point2D) -> Option<Point2D> {
+        let mut best: Option<(kurbo::Point, f64)> = None;
+
+        let rect = piet::kurbo::Rect::new(self.position.x, self.position.y, self.position.x + self.width, self.position.y + self.height + 5.0);
+
+        for segment in rect.path_segments(DESIRED_ACCURACY) {
+            let nearest = segment.nearest(kurbo::Point::new(pt.x, pt.y), DESIRED_ACCURACY);
+            if best.map(|(_, best_d)| nearest.distance_sq < best_d).unwrap_or(true) {
+                best = Some((segment.eval(nearest.t), nearest.distance_sq))
+            }
+        }
+        best.map(|(point, _)| Point2D::new(point.x, point.y))
     }
 
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{

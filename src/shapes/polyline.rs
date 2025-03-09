@@ -24,7 +24,7 @@ use super::geometry::{Point2D, Vector2D, BoundingRect2D};
 use super::shape::{DrawShape, hex_to_color, convert_to_color, DESIRED_ACCURACY};
 
 #[derive(Debug, Clone)]
-pub struct Pencil{
+pub struct Polyline{
     selected: bool,
     hovered: bool,
     color: String,
@@ -33,9 +33,9 @@ pub struct Pencil{
     points: Vec<Point2D>,
     selected_control_point: i32,
 }
-impl Pencil{
+impl Polyline{
     pub fn new(points: Vec<Point2D>, color: String, line_width: f64, background: Option<String>) -> Self {
-        Pencil{
+        Polyline{
             selected: false, 
             hovered: false, 
             color, 
@@ -49,7 +49,7 @@ impl Pencil{
         self.points.push(point);
     }
 }
-impl DrawShape for Pencil{
+impl DrawShape for Polyline{
     fn color(&self) -> &str {
         &self.color
     }
@@ -111,7 +111,6 @@ impl DrawShape for Pencil{
             }
         }
         best.map(|(point, _)| Point2D::new(point.x, point.y))
-
     }
 
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
@@ -163,7 +162,7 @@ impl DrawShape for Pencil{
         }
     }
 
-    // 자유 곡선을 그린다.
+    // 다중 직선을 그린다.
     fn draw(&self, context: &mut WebRenderContext, scale: f64){
         let mut color = hex_to_color(&self.color);
         if self.hovered{

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::f64::MAX;
 use std::iter::Scan;
 use std::str;
+use std::fmt::Debug;
 use std::task::Context;
 use std::thread::panicking;
 use log::info;
@@ -22,14 +23,16 @@ use svgtypes::Transform;
 use crate::state::State;
 use super::geometry::{Point2D, Vector2D, BoundingRect2D};
 
+pub const DESIRED_ACCURACY: f64 = 0.1;
 // Shape 트레이트 정의
-pub trait Shape : Send + Sync + Any{
+pub trait DrawShape : Debug + Send + Sync + Any{
     fn color(&self) -> &str;
     fn line_width(&self) -> f64 { 2.0 }
     fn max_point(&self) -> Point2D;
     fn min_point(&self) -> Point2D;
     fn bounding_rect(&self) -> BoundingRect2D;
     fn is_hit(&self, x: f64, y: f64, scale: f64) -> bool;
+    fn closest_perimeter_point(&self, pt: Point2D) -> Option<Point2D>;
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32;
     fn get_selected_control_point(&self) -> i32;
     fn set_selected_control_point(&mut self, index: i32);
@@ -47,7 +50,7 @@ pub trait Shape : Send + Sync + Any{
 }
 
 // ✅ Implement PartialEq for dyn Shape (by type downcasting)
-impl PartialEq for dyn Shape {
+impl PartialEq for dyn DrawShape{
     fn eq(&self, other: &Self) -> bool {
         self.as_any().type_id() == other.as_any().type_id() // ✅ Compare types
     }

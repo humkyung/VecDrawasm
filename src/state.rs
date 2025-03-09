@@ -28,6 +28,7 @@ pub enum DrawingMode {
     Rectangle,
     Polyline,
     Ellipse,
+    EllipticalArc,
     CubicBez,
     Text,
 }
@@ -40,6 +41,7 @@ impl fmt::Display for DrawingMode {
             DrawingMode::Rectangle => write!(f, "Rectangle Mode"),
             DrawingMode::Polyline => write!(f, "Polyline Mode"),
             DrawingMode::Ellipse => write!(f, "Ellipse Mode"),
+            DrawingMode::EllipticalArc=> write!(f, "EllipticalArc Mode"),
             DrawingMode::CubicBez => write!(f, "CubicBez Mode"),
             DrawingMode::Text => write!(f, "Text Mode"),
         }
@@ -58,7 +60,7 @@ pub struct State{
     scale: f64,     // 기본 스케일
     offset: Point2D,
     fill_color: String,
-    selected_control_point: Option<(i32, i32)>  // shape index, control point index
+    pub mouse_points: Vec<Point2D>,
 }
 
 impl State{
@@ -74,7 +76,7 @@ impl State{
             scale: 1.0,
             offset: Point2D::new(0.0, 0.0),
             fill_color: String::from("#ffffff"),
-            selected_control_point: None
+            mouse_points: Vec::new()
         }
     }
 
@@ -157,13 +159,5 @@ impl State{
 
     pub fn set_drawing_mode(&mut self, value: &DrawingMode) {
         self.drawing_mode = value.clone();
-    }
-
-    pub fn selected_control_point(&self) -> Option<(i32, i32)>{
-        self.selected_control_point
-    }
-
-    pub fn set_selected_control_point(&mut self, value: Option<(i32, i32)>){
-        self.selected_control_point = value;
     }
 }

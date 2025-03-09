@@ -1,5 +1,5 @@
 use std::ops::{self, Add, AddAssign, Sub, SubAssign, Mul};
-
+use std::f64::consts::PI;
 use kurbo::Point;
 
 #[derive(Debug, Clone, Copy)]
@@ -20,6 +20,12 @@ impl Point2D{
         self.y = value;
     }
 
+    pub fn distance_to(&self, pt: Point2D) -> f64{
+        let dx = pt.x - self.x;
+        let dy = pt.y - self.y;
+        (dx * dx + dy * dy).sqrt()
+    }
+
     pub fn to_string(&self) -> String{
         format!(r#"{:.3},{:.3}"#, self.x, self.y)
     }
@@ -28,6 +34,13 @@ impl Add<Point2D> for Point2D{
     type Output = Self;
 
     fn add(self, other: Point2D) -> Self{
+        Self{x: self.x + other.x, y: self.y + other.y}
+    }
+}
+impl Add<Vector2D> for Point2D{
+    type Output = Self;
+
+    fn add(self, other: Vector2D) -> Self{
         Self{x: self.x + other.x, y: self.y + other.y}
     }
 }
@@ -103,6 +116,11 @@ impl Vector2D{
         self.y /= length;
     }
 
+    pub fn normalized(&self) -> Vector2D{
+        let length = self.length();
+        Vector2D::new(self.x / length, self.y / length)
+    }
+
     pub fn dot(&self, vec: Vector2D) -> f64{
         self.x * vec.x + self.y * vec.y
     }
@@ -117,7 +135,7 @@ impl Vector2D{
     pub fn angle_to(&self, vec: Vector2D) -> f64{
         let mut radian = (self.dot(vec) / (self.length() * vec.length())).acos();
         let norm = self.cross(vec);
-        if norm < 0.0 {radian = -radian;}
+        if norm < 0.0 {radian = 2.0 * PI - radian;}
 
         radian
     }

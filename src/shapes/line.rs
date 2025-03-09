@@ -16,12 +16,11 @@ use web_sys::console::info;
 use web_sys::{window, CanvasRenderingContext2d, Element, DomParser, CanvasGradient, HtmlCanvasElement, Path2d, CssStyleDeclaration};
 
 use piet::{RenderContext, Color, StrokeStyle, Text, TextLayout, TextLayoutBuilder, ImageFormat};
-use kurbo::Affine;
+use kurbo::{Affine, Shape, ParamCurve, ParamCurveNearest};
 
 use crate::state::State;
 use super::geometry::{Point2D, Vector2D, BoundingRect2D};
-use super::shape::hex_to_color;
-use super::shape::Shape;
+use super::shape::{DrawShape, hex_to_color, DESIRED_ACCURACY};
 
 #[derive(Debug, Clone)]
 pub struct Line{
@@ -34,7 +33,7 @@ pub struct Line{
     selected_control_point: i32,
 }
 impl Line {
-    pub fn new(color: String, line_width: f64, start: Point2D, end: Point2D) -> Self {
+    pub fn new(start: Point2D, end: Point2D, color: String, line_width: f64) -> Self {
         Line {
             selected: false, 
             hovered: false, 
@@ -46,7 +45,7 @@ impl Line {
     }
 }
 
-impl Shape for Line{
+impl DrawShape for Line{
     fn color(&self) -> &str {
         &self.color
     }
@@ -71,6 +70,22 @@ impl Shape for Line{
         let dx = px - x;
         let dy = py - y;
         dx * dx + dy * dy < 25.0
+    }
+
+    /// Given a shape and a point, returns the closest position on the shape's
+    /// perimeter, or `None` if the shape is malformed.
+    fn closest_perimeter_point(&self, pt: Point2D) -> Option<Point2D> {
+        let mut best: Option<(kurbo::Point, f64)> = None;
+
+        let line = piet::kurbo::Line::new((self.start.x, self.start.y), (self.end.x, self.end.y));
+
+        for segment in line.path_segments(DESIRED_ACCURACY) {
+            let nearest = segment.nearest(kurbo::Point::new(pt.x, pt.y), DESIRED_ACCURACY);
+            if best.map(|(_, best_d)| nearest.distance_sq < best_d).unwrap_or(true) {
+                best = Some((segment.eval(nearest.t), nearest.distance_sq))
+            }
+        }
+        best.map(|(point, _)| Point2D::new(point.x, point.y))
     }
 
     fn max_point(&self) -> Point2D{

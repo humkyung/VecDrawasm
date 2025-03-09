@@ -14,11 +14,11 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use piet::{RenderContext, Color, StrokeStyle};
-use kurbo::{Affine, CubicBez};
+use kurbo::{Affine, Shape, Point, CubicBez, ParamCurve, ParamCurveNearest};
 
-use crate::state::State;
+use crate::state::{State, ActionMode};
 use super::geometry::{Point2D, Vector2D, BoundingRect2D};
-use super::shape::{Shape, convert_to_color};
+use super::shape::{DrawShape, convert_to_color, DESIRED_ACCURACY};
 
 #[derive(Debug, Clone)]
 pub struct CubicBezier{
@@ -91,7 +91,7 @@ impl CubicBezier{
     */
 }
 
-impl Shape for CubicBezier {
+impl DrawShape for CubicBezier {
     fn color(&self) -> &str {
         &self.color
     }
@@ -190,6 +190,23 @@ impl Shape for CubicBezier {
         true
     }
 
+    /// Given a shape and a point, returns the closest position on the shape's
+    /// perimeter, or `None` if the shape is malformed.
+    fn closest_perimeter_point(&self, pt: Point2D) -> Option<Point2D> {
+        let mut best: Option<(kurbo::Point, f64)> = None;
+
+        let bezier = piet::kurbo::CubicBez::new(kurbo::Point::new(self.p0.x, self.p0.y), kurbo::Point::new(self.p1.x, self.p1.y), 
+        kurbo::Point::new(self.p2.x, self.p2.y), kurbo::Point::new(self.p3.x, self.p3.y));
+
+        for segment in bezier.path_segments(DESIRED_ACCURACY) {
+            let nearest = segment.nearest(kurbo::Point::new(pt.x, pt.y), DESIRED_ACCURACY);
+            if best.map(|(_, best_d)| nearest.distance_sq < best_d).unwrap_or(true) {
+                best = Some((segment.eval(nearest.t), nearest.distance_sq))
+            }
+        }
+        best.map(|(point, _)| Point2D::new(point.x, point.y))
+    }
+
     /// Get the index of the control point that is hit by the mouse cursor.
     fn get_control_point(&self, x: f64, y: f64, scale: f64) -> i32{
         let mut control_pts = self.control_points(scale);
@@ -281,6 +298,30 @@ impl Shape for CubicBezier {
         context.transform(Affine::new([scale, 0.0, 0.0, scale, offset.x, offset.y]));
 
         self.draw(context, scale);
+        if state.action_mode() == ActionMode::Drawing{
+                if let Some(closest) = self.closest_perimeter_point(state.world_coord()){
+                if state.world_coord().distance_to(closest) < 10.0{
+                    // Define stroke style
+                    let mut stroke_style = StrokeStyle::new();
+                    stroke_style.set_line_cap(piet::LineCap::Round);
+                    stroke_style.set_line_join(piet::LineJoin::Bevel);
+
+                    let adjusted_width = 1.0 / scale;
+
+                    // draw mark
+                    let line = piet::kurbo::Line::new(
+                        Point::new(closest.x - 5.0 / scale, closest.y - 5.0 / scale), 
+                        Point::new(closest.x + 5.0 / scale, closest.y + 5.0 / scale));
+                    context.stroke_styled(line, &Color::BLUE, adjusted_width, &stroke_style);
+
+                    let line = piet::kurbo::Line::new(
+                        Point::new(closest.x - 5.0 / scale, closest.y + 5.0 / scale), 
+                        Point::new(closest.x + 5.0 / scale, closest.y - 5.0 / scale));
+                    context.stroke_styled(line, &Color::BLUE, adjusted_width, &stroke_style);
+                    //
+                }
+            }
+        }
 
         let _ = context.restore();
     }
