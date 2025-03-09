@@ -274,6 +274,29 @@ impl DrawShape for EllipticalArc{
         context.transform(Affine::new([scale, 0.0, 0.0, scale, offset.x, offset.y]));
 
         self.draw(context, scale);
+        if state.action_mode() == ActionMode::Drawing{
+            let adjusted_width = 1.0 / scale;
+            if let Some(closest) = self.closest_perimeter_point(state.world_coord()){
+                if state.world_coord().distance_to(closest) < 10.0{
+                    // Define stroke style
+                    let mut stroke_style = StrokeStyle::new();
+                    stroke_style.set_line_cap(piet::LineCap::Round);
+                    stroke_style.set_line_join(piet::LineJoin::Bevel);
+
+                    // draw mark
+                    let line = piet::kurbo::Line::new(
+                        Point::new(closest.x - 5.0 / scale, closest.y - 5.0 / scale), 
+                        Point::new(closest.x + 5.0 / scale, closest.y + 5.0 / scale));
+                    context.stroke_styled(line, &Color::BLUE, adjusted_width, &stroke_style);
+
+                    let line = piet::kurbo::Line::new(
+                        Point::new(closest.x - 5.0 / scale, closest.y + 5.0 / scale), 
+                        Point::new(closest.x + 5.0 / scale, closest.y - 5.0 / scale));
+                    context.stroke_styled(line, &Color::BLUE, adjusted_width, &stroke_style);
+                    //
+                }
+            }
+        }
 
         let _ = context.restore();
     }

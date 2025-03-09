@@ -16,9 +16,9 @@ use web_sys::console::info;
 use web_sys::{window, CanvasRenderingContext2d, Element, DomParser, CanvasGradient, HtmlCanvasElement, Path2d, CssStyleDeclaration};
 
 use piet::{RenderContext, Color, StrokeStyle, Text, TextLayout, TextLayoutBuilder, ImageFormat};
-use kurbo::{Affine, Shape, ParamCurve, ParamCurveNearest};
+use kurbo::{Affine, Shape, Point, ParamCurve, ParamCurveNearest};
 
-use crate::state::State;
+use crate::state::{State, ActionMode};
 use super::geometry::{Point2D, Vector2D, BoundingRect2D};
 use super::shape::{DrawShape, hex_to_color, DESIRED_ACCURACY};
 
@@ -186,6 +186,30 @@ impl DrawShape for Line{
         context.transform(Affine::new([scale, 0.0, 0.0, scale, offset.x, offset.y]));
 
         self.draw(context, scale);
+
+        if state.action_mode() == ActionMode::Drawing{
+            let adjusted_width = 1.0 / scale;
+            if let Some(closest) = self.closest_perimeter_point(state.world_coord()){
+                if state.world_coord().distance_to(closest) < 10.0{
+                    // Define stroke style
+                    let mut stroke_style = StrokeStyle::new();
+                    stroke_style.set_line_cap(piet::LineCap::Round);
+                    stroke_style.set_line_join(piet::LineJoin::Bevel);
+
+                    // draw mark
+                    let line = piet::kurbo::Line::new(
+                        Point::new(closest.x - 5.0 / scale, closest.y - 5.0 / scale), 
+                        Point::new(closest.x + 5.0 / scale, closest.y + 5.0 / scale));
+                    context.stroke_styled(line, &Color::BLUE, adjusted_width, &stroke_style);
+
+                    let line = piet::kurbo::Line::new(
+                        Point::new(closest.x - 5.0 / scale, closest.y + 5.0 / scale), 
+                        Point::new(closest.x + 5.0 / scale, closest.y - 5.0 / scale));
+                    context.stroke_styled(line, &Color::BLUE, adjusted_width, &stroke_style);
+                    //
+                }
+            }
+        }
 
         let _ = context.restore();
     }

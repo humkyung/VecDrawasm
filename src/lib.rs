@@ -90,8 +90,6 @@ pub fn start() -> Result<(), JsValue> {
 
     // 초기 캔버스 상태
     let last_mouse_pos = Rc::new(RefCell::new((0.0, 0.0)));
-    // 드로잉 포인트
-    //let mouse_context_points: Rc<RefCell<Vec<Point2D>>> = Rc::new(RefCell::new(Vec::new()));
 
     // show initial canvas
     {
@@ -240,7 +238,6 @@ pub fn start() -> Result<(), JsValue> {
 
                     let (current_x, current_y) = calculate_canvas_coordinates((mouse_x, mouse_y), (scroll_x, scroll_y));
                     state.borrow_mut().mouse_points.push(Point2D { x: current_x, y: current_y });
-                    //mouse_context_points.borrow_mut().push(Point2D { x: current_x, y: current_y });
                 }
             });
         })?;
@@ -251,7 +248,6 @@ pub fn start() -> Result<(), JsValue> {
         let canvas_clone = Rc::new(canvas.clone());
         let context_clone = Rc::clone(&piet_ctx);
         let last_mouse_pos = Rc::clone(&last_mouse_pos);
-        //let mouse_context_points= Rc::clone(&mouse_context_points);
 
         add_event_listener(&canvas, "mousemove", move |event: MouseEvent| {
             event.prevent_default();
@@ -342,11 +338,10 @@ pub fn start() -> Result<(), JsValue> {
 
                         let instance = VecDrawDoc::instance();
                         let doc = instance.lock().unwrap();
+                        doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
 
                         if action_mode == ActionMode::Drawing{
                             if state.borrow().mouse_points.len() > 0{
-                                doc.draw(&*canvas_clone, &mut context_clone.borrow_mut(), &*state.borrow());
-
                                 let current = Point2D::new(current_x, current_y);
                                 let mouse_context_points = state.borrow().mouse_points.clone();
                                 match drawing_mode{
@@ -386,12 +381,12 @@ pub fn start() -> Result<(), JsValue> {
                                 }
                             }else if shape.lock().unwrap().is_hit(current_x, current_y, state.borrow().scale()) {
                                 shape.lock().unwrap().set_hovered(true);
+
+                                let mut ctx = context_clone.borrow_mut(); // Context를 미리 빌려오기
+                                shape.lock().unwrap().draw_xor(&mut ctx, &*state.borrow());
                             } else {
                                 shape.lock().unwrap().set_hovered(false);
                             }
-
-                            let mut ctx = context_clone.borrow_mut(); // Context를 미리 빌려오기
-                            shape.lock().unwrap().draw_xor(&mut ctx, &*state.borrow());
                         });
                     }
                 });
@@ -1053,7 +1048,11 @@ fn draw_xor(drawing_mode: DrawingMode, points: Vec<Point2D>, end: Point2D) -> Re
 
                             let mut y_axis = x_axis.clone();
                             y_axis.normalize();
-                            y_axis.rotate_by(-0.5 * PI);
+                            if end.y > center.y{
+                                y_axis.rotate_by(0.5 * PI);
+                            }else{
+                                y_axis.rotate_by(-0.5 * PI);
+                            }
                             let line = piet::kurbo::Line::new(
                             Point::new(center.x, center.y),
                             Point::new(center.x + y_axis.x * raddi.y, center.y + y_axis.y * raddi.y));

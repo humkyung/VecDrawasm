@@ -279,7 +279,9 @@ impl DrawShape for CubicBezier {
         let bezier = piet::kurbo::CubicBez::new(kurbo::Point::new(self.p0.x, self.p0.y), kurbo::Point::new(self.p1.x, self.p1.y), 
         kurbo::Point::new(self.p2.x, self.p2.y), kurbo::Point::new(self.p3.x, self.p3.y));
         if let Some(ref background_color) = self.background {
-            context.fill(bezier, &convert_to_color(background_color));
+            if background_color != "none"{
+                context.fill(bezier, &convert_to_color(background_color));
+            }
         }
         context.stroke(bezier, &color, adjusted_width);
         
@@ -294,7 +296,6 @@ impl DrawShape for CubicBezier {
         // 줌 및 팬 적용 (기존의 scale과 offset 유지)
         let scale = state.scale();
         let offset = state.offset();
-        info!("scale = {}, offset = {:?}", scale, offset);
         context.transform(Affine::new([scale, 0.0, 0.0, scale, offset.x, offset.y]));
 
         self.draw(context, scale);
