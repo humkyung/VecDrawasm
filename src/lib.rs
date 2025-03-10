@@ -45,7 +45,7 @@ use crate::shapes::svg::{parse_svg_file, render_svg_to_canvas};
 mod vec_draw_doc;
 use crate::vec_draw_doc::VecDrawDoc;
 
-mod generate_pdf; // 📌 `piet_svg.rs` 모듈 불러오기
+mod request;
 
 // SHAPES 벡터 정의
 thread_local! {
