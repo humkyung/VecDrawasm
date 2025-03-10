@@ -40,7 +40,7 @@ use crate::shapes::{pencil::Pencil, line::Line, rectangle::Rectangle, polyline::
     cubic_bez::CubicBezier, text_box::TextBox, text_box::TextBoxManager};
 pub mod state;
 use crate::state::State;
-use crate::shapes::svg::{parse_svg_file, render_svg_to_canvas};
+use crate::shapes::svg::{parse_svg_file, parse_svg_data, render_svg_to_canvas};
 
 mod vec_draw_doc;
 use crate::vec_draw_doc::VecDrawDoc;
@@ -1549,6 +1549,26 @@ where
 }
 
 #[wasm_bindgen]
+pub fn svg_data_to_blob() -> Blob{
+
+    let instance = VecDrawDoc::instance();
+    let doc = instance.lock().unwrap();
+    let svg_content = doc.to_svg();
+
+    // 🔥 수정된 부분: 문자열을 `vec![...]`로 감싸서 배열 형태로 전달
+    let array = js_sys::Array::new();
+    array.push(&JsValue::from(svg_content));
+
+    let mut options = BlobPropertyBag::new();
+    options.type_("image/svg+xml");
+
+    let blob = Blob::new_with_str_sequence_and_options(&array, &options)
+        .expect("Failed to create Blob");
+    
+    blob
+}
+
+#[wasm_bindgen]
 pub fn download_svg(filename: &str) {
 
     let instance = VecDrawDoc::instance();
@@ -1578,4 +1598,56 @@ pub fn download_svg(filename: &str) {
     document.body().unwrap().remove_child(&a).unwrap();
     
     Url::revoke_object_url(&url).expect("Failed to revoke URL");
+}
+
+#[wasm_bindgen]
+pub fn open_svg(svg_data: &str) {
+    let window = web_sys::window().expect("No global window exists");
+    let document = window.document().expect("Should have a document on window");
+
+    // HTML5 캔버스 가져오기
+    let canvas = document
+        .get_element_by_id("drawing-canvas")
+        .expect("Canvas element not found")
+        .dyn_into::<HtmlCanvasElement>().unwrap();
+
+    let shapes = parse_svg_data(svg_data);
+    match shapes {
+        Ok(shapes) =>{
+            let instance = VecDrawDoc::instance();
+            let mut doc = instance.lock().unwrap();
+            doc.clear();
+            shapes.into_iter().for_each(|shape| {
+                doc.add_shape(shape);
+            });
+
+            if let Some(bounding_rect) = doc.bounding_rect(){
+                // 스케일 계산
+                let scale_x = canvas.width() as f64 / bounding_rect.width();
+                let scale_y = canvas.height() as f64 / bounding_rect.height();
+                let scale = scale_x.min(scale_y); // 가로/세로 중 작은 값으로 균형 맞추기
+                
+                // 중앙 정렬을 위한 오프셋 계산
+                let min = bounding_rect.min();
+                let offset_x = (canvas.width() as f64 - bounding_rect.width() * scale) / 2.0 - min.x * scale;
+                let offset_y  = (canvas.height() as f64 - bounding_rect.height() * scale) / 2.0 - min.y * scale;
+
+                STATE.with(|state| {
+                    let mut state = state.borrow_mut();
+                    PIET_CTX.with(|ctx|{
+                        if let Some(ref mut ctx) = *ctx.borrow_mut() {
+
+                            state.set_scale(scale);
+                            state.set_offset(&Point2D::new(offset_x, offset_y));
+
+                            doc.draw(&canvas, &mut ctx.borrow_mut(), &state);
+                        }
+                    });
+                });
+            }
+        }
+        Err(error) =>{
+            info!("There is a problem opening svg data: {:?}", error);
+        }
+    };
 }

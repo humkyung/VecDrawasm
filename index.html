@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="/styles/index.css">
     <link rel="stylesheet" href="/static/styles/index.css">
     <script type="module">
-        import init, {download_svg} from './pkg/vector_drawing_webapp.js';
+        import init, {open_svg, svg_data_to_blob, download_svg} from './pkg/vector_drawing_webapp.js';
 
         async function start() {
           await init();

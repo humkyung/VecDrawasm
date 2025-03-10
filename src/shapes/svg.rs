@@ -896,6 +896,29 @@ Result<Vec<Box<dyn DrawShape>>, JsValue> {
     Ok(shapes)
 }
 
+/// svg data를 파싱하여 svg element를 반환한다.
+pub fn parse_svg_data(svg_data: &str) -> Result<Vec<Box<dyn DrawShape>>, JsValue> {
+    let mut shapes = Vec::new();
+
+    let parser = DomParser::new().unwrap();
+    let doc = parser.parse_from_string(svg_data, web_sys::SupportedType::ImageSvgXml).unwrap();
+
+    if let Some(svg_element) = doc.query_selector("svg").ok().flatten() {
+        //let gradients = self.extract_gradients(context, &svg_element);
+        //self.extract_styles(&svg_element);
+        match parse_svg_element(&svg_element) {
+            Ok(elements) => shapes.extend(elements),
+            Err(e) => web_sys::console::error_1(&format!("Error parsing SVG element: {:?}", e).into()),
+        }
+    } else {
+        web_sys::console::log_1(&"⚠️ SVG 파싱 실패".into());
+    }
+
+    //render_svg_to_canvas(context, &canvas, &svg_data, drop_x, drop_y);
+
+    Ok(shapes)
+}
+
 // 🎯 SVG를 Canvas에 순서대로 그리는 함수 (g 요소 포함)
 fn parse_svg_element(parent_element: &Element) -> Result<Vec<Box<dyn DrawShape>>, JsValue>{
     let mut shapes: Vec<Box<dyn DrawShape>> = Vec::new();
