@@ -35,6 +35,8 @@ mod shapes{
     pub mod text_box;
     pub mod svg;
 }
+mod undo_redo_manager;
+
 use crate::shapes::geometry::{Point2D, Vector2D};
 use crate::shapes::{pencil::Pencil, line::Line, rectangle::Rectangle, polyline::Polyline, ellipse::Ellipse, elliptical_arc::EllipticalArc, 
     cubic_bez::CubicBezier, text_box::TextBox, text_box::TextBoxManager};
@@ -540,7 +542,7 @@ pub fn start() -> Result<(), JsValue> {
                                         let rx = center.distance_to(*p1);
                                         let ry = pt.distance_to(*p2);
                                         let arc = EllipticalArc::new(*center, rx, ry, rotation, start_angle, sweep_angle, 
-                                            state.color().to_string(), state.line_width());
+                                            state.color().to_string(), state.line_width(), state.background());
 
                                         let instance = VecDrawDoc::instance();
                                         let mut doc = instance.lock().unwrap();

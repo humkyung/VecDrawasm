@@ -942,8 +942,16 @@ fn parse_svg_element(parent_element: &Element) -> Result<Vec<Box<dyn DrawShape>>
                             shapes.push(rectangle);
                         }
                     },
-                    //"polygon" => self.render_polygon(&context, element, gradients),
-                    //"polyline" => self.render_polyline(&context, element, gradients),
+                    "polygon" => {
+                        if let Some(polygon) = parse_polygon(element){
+                            shapes.push(polygon);
+                        }
+                    },
+                    "polyline" => {
+                        if let Some(polyline) = parse_polyline(element){
+                            shapes.push(polyline);
+                        }
+                    },
                     "ellipse" => {
                         if let Some(ellipse) = parse_ellipse(element){
                             shapes.push(ellipse);
@@ -1023,6 +1031,97 @@ fn parse_rect(rect_element: &Element) -> Option<Box<dyn DrawShape>>{
 
     let rectangle = Rectangle::new(Point2D::new(x_pos, y_pos), width, height, color.to_string(), 1.0, Some(fill.to_string()));
     Some(Box::new(rectangle))
+}
+
+/// parse polyline element
+fn parse_polyline(polyline_element: &Element) -> Option<Box<dyn DrawShape>>{
+    if let Some(points_str) = polyline_element.get_attribute("points") {
+        let mut points: Vec<Point2D> = Vec::new();
+        let points_vec: Vec<&str> = points_str.split_whitespace().collect();
+        if points_vec.len() >= 2 {
+            if let Some(first_point) = points_vec.get(0) {
+                let coords: Vec<f64> = first_point.split(',')
+                    .filter_map(|s| s.parse::<f64>().ok())
+                    .collect();
+                if coords.len() == 2 {
+                    points.push(Point2D::new(coords[0], coords[1]));
+                }
+            }
+
+            for point in points_vec.iter().skip(1) {
+                let coords: Vec<f64> = point.split(',')
+                    .filter_map(|s| s.parse::<f64>().ok())
+                    .collect();
+                if coords.len() == 2 {
+                    points.push(Point2D::new(coords[0], coords[1]));
+                }
+            }
+
+            let mut color = "#000000".to_string();
+            let mut fill = "none".to_string();
+            if let Some(style) = polyline_element.get_attribute("style"){
+                let style_map = parse_svg_style(&style);
+                if let Some(fill_value) = style_map.get("fill") {
+                    fill = fill_value.clone();
+                }
+
+                if let Some(stroke_value) = style_map.get("stroke") {
+                    color = stroke_value.clone();
+                }
+            }
+
+            let polyline = Polyline::new(points, color, 1.0, Some(fill.to_string()));
+            return Some(Box::new(polyline));
+        }
+    }
+
+    None
+}
+
+/// parse polygon element
+fn parse_polygon(polygon_element: &Element) -> Option<Box<dyn DrawShape>>{
+    if let Some(points_str) = polygon_element.get_attribute("points") {
+        let mut points: Vec<Point2D> = Vec::new();
+        let points_vec: Vec<&str> = points_str.split_whitespace().collect();
+        if points_vec.len() >= 2 {
+            if let Some(first_point) = points_vec.get(0) {
+                let coords: Vec<f64> = first_point.split(',')
+                    .filter_map(|s| s.parse::<f64>().ok())
+                    .collect();
+                if coords.len() == 2 {
+                    points.push(Point2D::new(coords[0], coords[1]));
+                }
+            }
+
+            for point in points_vec.iter().skip(1) {
+                let coords: Vec<f64> = point.split(',')
+                    .filter_map(|s| s.parse::<f64>().ok())
+                    .collect();
+                if coords.len() == 2 {
+                    points.push(Point2D::new(coords[0], coords[1]));
+                }
+            }
+            points.push(points[0]);
+
+            let mut color = "#000000".to_string();
+            let mut fill = "none".to_string();
+            if let Some(style) = polygon_element.get_attribute("style"){
+                let style_map = parse_svg_style(&style);
+                if let Some(fill_value) = style_map.get("fill") {
+                    fill = fill_value.clone();
+                }
+
+                if let Some(stroke_value) = style_map.get("stroke") {
+                    color = stroke_value.clone();
+                }
+            }
+
+            let polyline = Polyline::new(points, color, 1.0, Some(fill.to_string()));
+            return Some(Box::new(polyline));
+        }
+    }
+
+    None
 }
 
 // 🎯 Ellipse 요소 처리

@@ -182,9 +182,11 @@ impl DrawShape for Polyline{
                 path.line_to(Point::new(point.x, point.y));
             }
             if let Some(ref background) = self.background{
-                path.close_path();
+                if background != "none"{
+                    path.close_path();
 
-                context.fill(path.clone(), &convert_to_color(&background));
+                    context.fill(path.clone(), &convert_to_color(&background));
+                }
                 context.stroke_styled(path, &color, adjusted_width, &stroke_style);
             }
             else{

@@ -33,6 +33,8 @@ use crate::shapes::{pencil::Pencil, line::Line, rectangle::Rectangle, ellipse::E
 
 use crate::state::State;
 
+use crate::undo_redo_manager::{StateCommandMode, StateCommand, UndoRedoManager};
+
 const GRID_SIZE: f64 = 50.0; // 그리드 간격
 
 // ✅ 싱글톤 VecDrawDoc
@@ -41,6 +43,7 @@ pub struct VecDrawDoc {
     canvas: HtmlCanvasElement,
     pub shapes: Vec<Arc<Mutex<Box<dyn DrawShape>>>>,    // ✅ 공유 가능한 Shape 리스트
     pub ghost: Option<Arc<Mutex<Box<dyn DrawShape>>>>,  // ✅ 공유 가능한 임시 Shape
+    manager: UndoRedoManager
 }
 unsafe impl Send for VecDrawDoc {}
 unsafe impl Sync for VecDrawDoc {}
@@ -51,8 +54,10 @@ impl VecDrawDoc {
             document,
             canvas,
             shapes: Vec::new(),
-            ghost: None}
+            ghost: None,
+            manager: UndoRedoManager::new(),
         }
+    }
 
     pub fn instance() -> Arc<Mutex<Self>> {
         static INSTANCE: Lazy<Arc<Mutex<VecDrawDoc>>> = Lazy::new(|| {
@@ -68,8 +73,13 @@ impl VecDrawDoc {
         Arc::clone(&INSTANCE) // ✅ 공유된 인스턴스 반환
     }
 
+    /// shape를 추가한다.
     pub fn add_shape(&mut self, shape: Box<dyn DrawShape>) {
-        self.shapes.push(Arc::new(Mutex::new(shape)));
+        let add = Arc::new(Mutex::new(shape));
+        let clone = add.clone();
+        self.shapes.push(add);
+
+        self.manager.push(StateCommand::new(StateCommandMode::Create, vec![clone]));
     }
 
     pub fn erase(&mut self, x: f64, y: f64, scale: f64) {
@@ -90,6 +100,14 @@ impl VecDrawDoc {
 
     pub fn nth(&self, index: usize) -> Option<Arc<Mutex<Box<dyn DrawShape>>>> {
         self.shapes.get(index).cloned()
+    }
+
+    pub fn undo(){
+
+    }
+
+    pub fn redo(){
+
     }
 
     /// 모든 shape들을 포함하는 BoundingRect를 반환한다.

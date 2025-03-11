@@ -19,9 +19,10 @@ use web_sys::{window, CanvasRenderingContext2d};
 use piet::{RenderContext, Color, StrokeStyle};
 use kurbo::{Affine, Shape, Point, Vec2, ParamCurve, ParamCurveNearest};
 
+use crate::start;
 use crate::state::{State, ActionMode};
 use super::geometry::{Point2D, Vector2D, BoundingRect2D};
-use super::shape::{DrawShape, hex_to_color, DESIRED_ACCURACY};
+use super::shape::{DrawShape, convert_to_color, DESIRED_ACCURACY};
 
 #[derive(Debug, Clone)]
 pub struct EllipticalArc{
@@ -34,13 +35,14 @@ pub struct EllipticalArc{
     selected: bool,
     hovered: bool,
     color: String,
+    background: Option<String>,
     line_width: f64,
     axis_x: Vector2D,
     axis_y: Vector2D,
     selected_control_point: i32
 }
 impl EllipticalArc{
-    pub fn new(center: Point2D, rx: f64, ry: f64, rotation: f64, start_angle: f64, sweep_angle: f64, color: String, line_width: f64) -> Self {
+    pub fn new(center: Point2D, rx: f64, ry: f64, rotation: f64, start_angle: f64, sweep_angle: f64, color: String, line_width: f64, background: Option<String>) -> Self {
         EllipticalArc{
             center, 
             radius_x: rx, 
@@ -51,6 +53,7 @@ impl EllipticalArc{
             selected: false, 
             hovered: false, 
             color, 
+            background,
             line_width , 
             axis_x: Vector2D::AXIS_X, 
             axis_y: Vector2D::AXIS_Y,
@@ -83,6 +86,28 @@ impl EllipticalArc{
         let mut axis_y = Vector2D::AXIS_Y.clone();
         axis_y.rotate_by(self.rotation);
         axis_y
+    }
+
+    // 주어진 angle(라디안)에 해당하는 타원 위의 Point를 반환
+    fn point_on_ellipse(&self, angle: f64) -> Point {
+        let a = self.radius_x; // X축 반지름
+        let b = self.radius_y; // Y축 반지름
+        let center = self.center;
+        let x_rotation = self.rotation;
+
+        // 기본 타원 좌표 (회전 전)
+        let x = a * angle.cos();
+        let y = b * angle.sin();
+
+        // 회전 변환 적용
+        let rotated_x = x * x_rotation.cos() - y * x_rotation.sin();
+        let rotated_y = x * x_rotation.sin() + y * x_rotation.cos();
+
+        // 중심 좌표 적용
+        Point {
+            x: center.x + rotated_x,
+            y: center.y + rotated_y,
+        }
     }
 }
 impl DrawShape for EllipticalArc{
@@ -246,7 +271,7 @@ impl DrawShape for EllipticalArc{
     }
 
     fn draw(&self, context: &mut WebRenderContext, scale: f64){
-        let mut color = hex_to_color(&self.color);
+        let mut color = convert_to_color(&self.color);
         if self.hovered{
             color = Color::RED;
         }
@@ -259,7 +284,12 @@ impl DrawShape for EllipticalArc{
             self.start_angle, self.sweep_angle,
            self.rotation 
         );
-    
+        if let Some(ref background_color) = self.background {
+            if background_color != "none"{
+                context.fill(arc, &convert_to_color(background_color));
+            }
+        }
+
         context.stroke(&arc, &color, adjusted_width);
         
         if self.selected{ self.draw_control_points(context, scale);}
@@ -304,7 +334,7 @@ impl DrawShape for EllipticalArc{
     fn draw_control_points(&self, context: &mut WebRenderContext, scale: f64) {
         let adjusted_width = 5.0 / scale;
 
-        let color = hex_to_color("#29B6F2");
+        let color = convert_to_color("#29B6F2");
 
         let control_pts = self.control_points();
         for point in control_pts{
@@ -331,7 +361,32 @@ impl DrawShape for EllipticalArc{
     }
 
     fn to_svg(&self, rect: BoundingRect2D) -> String{
-        "".to_string()
+        let origin = rect.min();
+
+        let mut style = "".to_string();
+        if let Some(ref background) = self.background{
+            style = format!(r#"fill:{background};stroke:{color}"#, 
+            background = background, color = self.color);
+        }
+        else{
+            style = format!(r#"fill:none;stroke:{color}"#, color = self.color);
+        }
+
+        let mut svg = "<path d=".to_string();
+
+        let start_point = self.point_on_ellipse(self.start_angle);
+        let end_point = self.point_on_ellipse(self.start_angle + self.sweep_angle);
+
+        let content = format!(r#""M {} {} A {} {}, {}, 1 1, {} {}""#, 
+        start_point.x - origin.x, start_point.y - origin.y, 
+        self.radius_x, self.radius_y, 
+        self.rotation.to_degrees(),
+        end_point.x - origin.x, end_point.y - origin.y).to_string();
+
+        svg.push_str(&content);
+        svg.push_str(format!(r#" style="{}"/>"#, style).as_str());
+
+        svg
     }
 
     fn as_any(&self) -> &dyn Any {
